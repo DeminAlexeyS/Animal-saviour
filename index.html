@@ -78,35 +78,32 @@
 
   /* ---------- In-level HUD ---------- */
   #hud { position: absolute; inset: 0; pointer-events: none; }
-  #hud > * , #leftCol > *, #animalsGroup > * { pointer-events: auto; }
-  #leftCol {
-    position: absolute; left: var(--pl); top: var(--pt); bottom: var(--pb);
-    display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start;
-    pointer-events: none !important;
-  }
-  #animalsGroup { display: flex; flex-direction: column; align-items: flex-start; flex: 0 1 auto; min-height: 0; pointer-events: none !important; }
-  #leftCol .btn { flex: 0 0 auto; margin-top: 6px; }
-  #animalsGroup .btn { margin-top: 0; }
+  #hud > * { pointer-events: auto; }
+  /* Animal list: always visible on the left. Button size comes from CONFIG.animalButtonSize. */
   #panel {
-    flex: 0 1 auto; min-height: 0; max-height: 0; overflow-x: hidden; overflow-y: auto;
-    transition: max-height .25s ease; scrollbar-width: none; border-radius: 0 0 12px 12px;
+    position: absolute; left: var(--pl); top: var(--pt); max-height: calc(100% - var(--pt) - var(--pb));
+    display: flex; flex-direction: column; gap: 6px; padding: 0 3px 5px 0;
+    overflow-x: hidden; overflow-y: auto; scrollbar-width: none; border-radius: 12px;
   }
   #panel::-webkit-scrollbar { display: none; }
-  #panel.open { max-height: 100vh; }
-  .row { display: flex; gap: 4px; margin-top: 6px; }
   .icon {
-    position: relative; width: 112px; height: 104px; border-radius: 14px; line-height: 1;
-    display: flex; align-items: center; justify-content: center; padding-bottom: 10px;
+    position: relative; flex: 0 0 auto; width: var(--icon, 56px); height: calc(var(--icon, 56px) * 0.93);
+    border-radius: 10px; line-height: 1;
+    display: flex; align-items: center; justify-content: center; padding-bottom: calc(var(--icon, 56px) * 0.1);
     background: var(--paper); border: 2px solid rgba(0,0,0,.4); box-shadow: 0 3px 0 rgba(0,0,0,.35);
     touch-action: none; cursor: grab;
   }
+  #panel.hot .icon { background: #9be07a; }
   .icon canvas { pointer-events: none; }
   .badge {
-    position: absolute; right: 5px; bottom: 5px; padding: 2px 8px; border-radius: 10px;
-    font-size: 15px; font-weight: 800; line-height: 1.2; background: #2e7d32; color: #fff;
+    position: absolute; right: 2px; bottom: 2px; padding: 1px 5px; border-radius: 8px;
+    font-size: calc(var(--icon, 56px) * 0.215); font-weight: 800; line-height: 1.2; background: #2e7d32; color: #fff;
   }
-  .badge.price { right: auto; left: 5px; background: #b07a09; }
+  .badge.price { background: #b07a09; }
   #menuAnimals { display: flex; gap: 6px; align-items: flex-end; }
+  /* Pen buttons on the right side */
+  #btnEdit { position: absolute; right: var(--pr); top: 50%; transform: translateY(-50%); }
+  #btnPen { position: absolute; right: var(--pr); bottom: var(--pb); }
 
   #topCenter { position: absolute; left: 50%; top: var(--pt); transform: translateX(-50%); width: min(38vw, 260px); text-align: center; pointer-events: none !important; text-shadow: 0 1px 2px rgba(0,0,0,.8); }
   #wbRow { display: flex; align-items: center; gap: 6px; font-weight: 800; font-size: 16px; }
@@ -129,7 +126,6 @@
   }
   #sell small { font-size: 12px; font-weight: 800; margin-top: 2px; }
   #sell.hot { transform: scale(1.18); background: #e74c3c; }
-  #btnAnimals.hot { background: #9be07a; }
   #trash { position: absolute; transform: translate(-50%, -50%); padding: 0; font-size: 22px; background: #e2574c; }
   #toast {
     position: absolute; left: 50%; bottom: var(--pb); transform: translateX(-50%); max-width: 60vw;
@@ -172,14 +168,7 @@
 
 <!-- In-level HUD (floats over the canvas) -->
 <div id="hud" class="hidden">
-  <div id="leftCol">
-    <div id="animalsGroup">
-      <button id="btnAnimals" class="btn"><span>🐾</span><span data-i18n="btn_animals"></span></button>
-      <div id="panel"></div>
-    </div>
-    <button id="btnEdit" class="btn"><span>✏️</span><span data-i18n="btn_edit"></span></button>
-    <button id="btnPen" class="btn"><span>🔨</span><span data-i18n="btn_new_pen"></span></button>
-  </div>
+  <div id="panel"></div>
   <div id="topCenter">
     <div id="wbRow"><span>❤️</span><span id="wbNum">100</span><div id="wbBar"><div id="wbFill"></div></div></div>
     <div id="goal"></div>
@@ -188,6 +177,8 @@
     <div id="money"><span>💰</span><span id="moneyVal">0</span></div>
     <button id="btnPause" class="btn">⏸</button>
   </div>
+  <button id="btnEdit" class="btn"><span>✏️</span><span data-i18n="btn_edit"></span></button>
+  <button id="btnPen" class="btn"><span>🔨</span><span data-i18n="btn_new_pen"></span></button>
   <div id="sell" class="hidden"><span>💰</span><small data-i18n="sell"></small></div>
   <button id="trash" class="btn hidden">🗑️</button>
   <div id="toast"></div>
@@ -287,6 +278,9 @@ const CONFIG = {
 
   defaultVolume: 0.6,
 
+  // UI
+  animalButtonSize: 56,       // width of the animal buttons on the left, in CSS pixels (try 48 to 112)
+
   // Animals: price / income per donation tick / species they fear
   animalOrder: ['chicken', 'rabbit', 'deer', 'wolf', 'tiger', 'elephant'],
   // (size = how big the animal is drawn compared with the others)
@@ -320,7 +314,24 @@ const CONFIG = {
       wolf:     { idle: [], walk: [] },
       tiger:    { idle: [], walk: [] },
       elephant: { idle: [], walk: [] }
-    }
+    },
+
+    // SCENERY ART — same idea: list image files, an empty list keeps the built-in drawing.
+    //   grass:        one or more ground tiles. Each image is one diamond-shaped tile filling the whole
+    //                 image (corners at the middle of each side), width : height = 1 : isoRatio
+    //                 (e.g. 200 × 112 px for isoRatio 0.56). With several images the tiles are mixed.
+    //   trees:        one or more trees, trunk base at the bottom centre. Each tree picks one image.
+    //   fenceSegment: ONE image of a fence section one tile long, running from upper-left to lower-right.
+    //                 The image width equals half a tile width. The ground line of the fence starts on the
+    //                 left side at (image width × isoRatio) above the bottom and ends in the bottom-right
+    //                 corner. The game mirrors it for fences running the other way.
+    //   fencePost:    ONE optional image of a post, base at the bottom centre, drawn at every tile corner
+    //                 of a fence (leave empty if the posts are already part of fenceSegment).
+    // Example:  grass: ['art/grass1.png', 'art/grass2.png'],  trees: ['art/oak.png', 'art/pine.png'],
+    //           fenceSegment: ['art/fence.png'],  fencePost: ['art/post.png']
+    scenery: { grass: [], trees: [], fenceSegment: [], fencePost: [] },
+    treeHeight: 2.1,          // height of a tree image, in tile edge lengths
+    fencePostHeight: 0.5      // height of a post image, in tile edge lengths
   },
 
   // Levels. goal.type is 'money' (reach amount) or 'animals' (adults of a species in pens)
@@ -349,7 +360,7 @@ const STRINGS = {
     menu_levels: 'Levels', menu_options: 'Options', menu_bestiary: 'Bestiary',
     back: 'Back', menu: 'Menu',
 
-    btn_animals: 'Animals', btn_edit: 'Edit', btn_new_pen: 'New pen', sell: 'Sell',
+    btn_edit: 'Edit', btn_new_pen: 'New pen', sell: 'Sell',
 
     level_n: 'Level {n}', start: 'Start',
     goal_money: 'Money {cur} / {goal}',
@@ -389,7 +400,6 @@ const STRINGS = {
     best_fears: 'Fears: {list}', best_nothing: 'nothing',
     best_price: 'Price: {n}', best_income: 'Income: {n} per {s} s',
 
-    toast_need_pen: 'Build a pen first.',
     toast_pen_mode: 'Drag on the field to draw a pen.',
     toast_edit_mode: 'Drag a corner to resize. Tap an empty pen to delete it.',
     toast_pen_not_empty: 'Move the animals out before deleting this pen.',
@@ -456,7 +466,7 @@ let G = null;
 /** UI state: which screen, which mode, what the finger is doing. */
 const UI = {
   screen: 'menu',     // 'menu' | 'levels' | 'bestiary' | 'game'
-  mode: null,         // null | 'pen' | 'edit' | 'animals'
+  mode: null,         // null | 'pen' | 'edit'
   dialog: null,       // the open dialog spec, or null
   rotate: false,      // portrait blocker visible
   drag: null,         // current drag gesture (see section 6)
@@ -1049,7 +1059,7 @@ function dragMove(px, py) {
 function dropTarget(px, py) {
   const gy = py - Input.lift;   // the item is drawn above the finger; accept either point
   if (pointIn($('sell'), px, py) || pointIn($('sell'), px, gy)) return 'sell';
-  if (pointIn($('btnAnimals'), px, py) || pointIn($('btnAnimals'), px, gy)) return 'stock';
+  if (pointIn($('panel'), px, py) || pointIn($('panel'), px, gy)) return 'stock';   // the animal list
   return null;
 }
 
@@ -1165,20 +1175,19 @@ function resize() {
 /** Fit the whole field between the floating UI and pre-render the ground. */
 function layoutField() {
   if (!G) return;
-  let side = 0;
-  for (const id of ['btnAnimals', 'btnEdit', 'btnPen']) side = Math.max(side, $(id).getBoundingClientRect().right);
-  if (!(side > 0)) side = 110;
-  side += 8;
+  // free space between the animal list (left), the pen buttons (right) and the top bar
+  const pr = $('panel').getBoundingClientRect(), er = $('btnEdit').getBoundingClientRect(), nr = $('btnPen').getBoundingClientRect();
+  const left = (pr.width > 0 ? pr.right : 64) + 8;
+  const right = (er.width > 0 ? View.w - Math.min(er.left, nr.left) : 110) + 8;
   const tc = $('topCenter').getBoundingClientRect();
   const headroom = 14;                               // room above the back corner for fences and animals
   const top = (tc.height > 0 ? tc.bottom : 52) + 6 + headroom;
-  const lc = $('leftCol').getBoundingClientRect();
-  const bottom = (lc.height > 0 ? Math.max(8, View.h - lc.bottom) : 8) + 6;
-  const availW = View.w - 2 * side, availH = View.h - top - bottom;
+  const bottom = (nr.height > 0 ? Math.max(8, View.h - nr.bottom) : 8) + 6;
+  const availW = View.w - left - right, availH = View.h - top - bottom;
   const n = (G.cols + G.rows) / 2;                   // the field diamond is n tiles wide and n tiles tall
   const tw = Math.max(16, Math.floor(Math.min(availW / n, availH / (n * CONFIG.isoRatio))));
   View.base = { tw };
-  View.area = { x: side, y: top, w: availW, h: availH };
+  View.area = { x: left, y: top, w: availW, h: availH };
   View.zoom = 1;
   setTileSize(tw);
   clampCamera();
@@ -1225,11 +1234,18 @@ function buildGround() {
   g.beginPath(); g.moveTo(X(c, r), Y(c, r)); g.lineTo(X(c, r), Y(c, r) + rim); g.lineTo(X(c, 0), Y(c, 0) + rim); g.lineTo(X(c, 0), Y(c, 0)); g.closePath();
   g.fillStyle = '#684b2a'; g.fill();
   // grass
+  const tiles = Art.scenery('grass');
   quad(0, 0, c, r); g.fillStyle = '#6cc04b'; g.fill();
+  if (tiles) {                                       // artist tiles: one image per cell
+    for (let y = 0; y < r; y++) for (let x = 0; x < c; x++) {
+      const im = tiles[(x * 7 + y * 13 + ((x * y) % 3)) % tiles.length];
+      g.drawImage(im, X(x, y + 1) - 0.5, Y(x, y) - 0.5, tw + 1, th + 1);
+    }
+  }
   g.fillStyle = '#62b644';
-  for (let y = 0; y < r; y++) for (let x = (y + 1) % 2; x < c; x += 2) { quad(x, y, x + 1, y + 1); g.fill(); }
+  for (let y = 0; y < r && !tiles; y++) for (let x = (y + 1) % 2; x < c; x += 2) { quad(x, y, x + 1, y + 1); g.fill(); }
   g.strokeStyle = 'rgba(40,110,30,.6)'; g.lineWidth = Math.max(1, tw * 0.02); g.lineCap = 'round';
-  for (let y = 0; y < r; y++) for (let x = 0; x < c; x++) for (let i = 0; i < 2; i++) {   // grass tufts
+  for (let y = 0; y < r && !tiles; y++) for (let x = 0; x < c; x++) for (let i = 0; i < 2; i++) {   // grass tufts
     const fx = x + 0.2 + 0.6 * Math.random(), fy = y + 0.2 + 0.6 * Math.random(), bx = X(fx, fy), by = Y(fx, fy);
     g.beginPath(); g.moveTo(bx, by); g.lineTo(bx - tw * 0.025, by - tw * 0.07);
     g.moveTo(bx, by); g.lineTo(bx + tw * 0.03, by - tw * 0.06); g.stroke();
@@ -1243,7 +1259,7 @@ function buildTrees() {
   let seed = 12345 + G.levelIdx * 977;
   const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
   const list = [];
-  const add = (fx, fy) => list.push({ fx, fy, kind: rnd() < 0.5 ? 'tree' : 'pine', size: 0.85 + 0.4 * rnd() });
+  const add = (fx, fy) => list.push({ fx, fy, kind: rnd() < 0.5 ? 'tree' : 'pine', size: 0.85 + 0.4 * rnd(), pick: Math.floor(rnd() * 1000) });
   for (let i = 0; i < 9; i++) add(-1 - 4 * rnd(), -4 + (G.rows + 6) * rnd());      // behind the left edge
   for (let i = 0; i < 9; i++) add(-4 + (G.cols + 6) * rnd(), -1 - 4 * rnd());      // behind the right edge
   for (let i = 0; i < 4; i++) add(G.cols + 3.5 + 2 * rnd(), G.rows * rnd());       // far in front
@@ -1453,16 +1469,32 @@ function drawPenGround(p, tint) {
 }
 /** One fence side from field point (x0, y0) to (x1, y1), with a post at each of the n cell boundaries. */
 function drawFence(x0, y0, x1, y1, n) {
-  const c = View.field.cell, ph = c * 0.46, pw = Math.max(3, c * 0.12);
+  const F = View.field, c = F.cell, ph = c * 0.46, pw = Math.max(3, c * 0.12);
   const ax = sx(x0, y0), ay = sy(x0, y0), bx = sx(x1, y1), by = sy(x1, y1);
-  ctx.lineCap = 'butt';
-  for (const h of [0.36, 0.76]) {                                 // two rails
-    ctx.beginPath(); ctx.moveTo(ax, ay - ph * h); ctx.lineTo(bx, by - ph * h);
-    ctx.lineWidth = Math.max(3, c * 0.11); ctx.strokeStyle = '#6b4520'; ctx.stroke();
-    ctx.lineWidth = Math.max(1.5, c * 0.06); ctx.strokeStyle = '#c4915a'; ctx.stroke();
+  const seg = Art.scenery('fenceSegment'), post = Art.scenery('fencePost');
+  if (seg) {                                        // artist fence: one image per tile edge
+    const im = seg[0], w = F.tw / 2, h = im.height * w / im.width;
+    for (let i = 0; i < n; i++) {
+      const startX = ax + (bx - ax) * i / n, endY = ay + (by - ay) * (i + 1) / n;
+      if (bx > ax) ctx.drawImage(im, startX, endY - h, w, h);                 // runs down-right
+      else { ctx.save(); ctx.translate(startX, 0); ctx.scale(-1, 1); ctx.drawImage(im, 0, endY - h, w, h); ctx.restore(); }   // down-left: mirrored
+    }
+  } else {
+    ctx.lineCap = 'butt';
+    for (const h of [0.36, 0.76]) {                               // two rails
+      ctx.beginPath(); ctx.moveTo(ax, ay - ph * h); ctx.lineTo(bx, by - ph * h);
+      ctx.lineWidth = Math.max(3, c * 0.11); ctx.strokeStyle = '#6b4520'; ctx.stroke();
+      ctx.lineWidth = Math.max(1.5, c * 0.06); ctx.strokeStyle = '#c4915a'; ctx.stroke();
+    }
   }
+  if (!post && seg) return;                         // posts are part of the artist's segment
   for (let i = 0; i <= n; i++) {                                  // posts
     const x = ax + (bx - ax) * i / n, y = ay + (by - ay) * i / n;
+    if (post) {
+      const im = post[0], h = c * CONFIG.art.fencePostHeight, w = h * im.width / im.height;
+      ctx.drawImage(im, x - w / 2, y - h, w, h);
+      continue;
+    }
     ctx.fillStyle = '#6b4520'; ctx.fillRect(x - pw / 2 - 1, y - ph - 1, pw + 2, ph + 2);
     ctx.fillStyle = '#a06c38'; ctx.fillRect(x - pw / 2, y - ph, pw, ph);
     ctx.fillStyle = '#d2a36a'; ctx.fillRect(x - pw / 2, y - ph, pw, Math.max(1.5, pw * 0.4));
@@ -1508,12 +1540,18 @@ function render() {
   if (!Input.pinch && Math.abs(c / (View.spriteCell || 1) - 1) > 0.25) { View.sprites.clear(); View.frames.clear(); View.spriteCell = c; }
 
   // Trees around the field
+  const treeArt = Art.scenery('trees');
   for (const tr of View.trees) {
     const s = c * 2.3 * tr.size, x = sx(tr.fx, tr.fy), y = sy(tr.fx, tr.fy);
     if (x < -s || x > View.w + s || y < -s || y > View.h + s * 1.2) continue;
     ctx.fillStyle = 'rgba(0,0,0,.16)';
     ctx.beginPath(); ctx.ellipse(x, y, s * 0.26, s * 0.09, 0, 0, TAU); ctx.fill();
-    ctx.drawImage(sprite(tr.kind, (g, size) => { g.scale(size, size); drawTree(g, tr.kind); }), x - s / 2, y - s * 0.96, s, s);
+    if (treeArt) {
+      const im = treeArt[tr.pick % treeArt.length], h = c * CONFIG.art.treeHeight * tr.size, w = h * im.width / im.height;
+      ctx.drawImage(im, x - w / 2, y - h, w, h);
+    } else {
+      ctx.drawImage(sprite(tr.kind, (g, size) => { g.scale(size, size); drawTree(g, tr.kind); }), x - s / 2, y - s * 0.96, s, s);
+    }
   }
 
   // Field
@@ -1911,8 +1949,6 @@ function handleEvents() {
 function syncModeButtons() {
   $('btnPen').classList.toggle('active', UI.mode === 'pen');
   $('btnEdit').classList.toggle('active', UI.mode === 'edit');
-  $('btnAnimals').classList.toggle('active', UI.mode === 'animals');
-  $('panel').classList.toggle('open', UI.mode === 'animals');
 }
 function setMode(mode) {
   if (!G || G.over) return;
@@ -1923,11 +1959,6 @@ function setMode(mode) {
 }
 onTap($('btnPen'), () => { Sound.play('tap'); setMode('pen'); if (UI.mode === 'pen') showToast(t('toast_pen_mode')); });
 onTap($('btnEdit'), () => { Sound.play('tap'); setMode('edit'); if (UI.mode === 'edit' && G.pens.length) showToast(t('toast_edit_mode')); });
-onTap($('btnAnimals'), () => {
-  Sound.play('tap');
-  if (G && !G.pens.length && UI.mode !== 'animals') { showToast(t('toast_need_pen')); return; }
-  setMode('animals');
-});
 onTap($('btnPause'), () => { Sound.play('tap'); openPause(); });
 onTap($('trash'), () => {
   if (UI.selectedPen && deletePen(UI.selectedPen)) { Sound.play('sell'); UI.selectedPen = null; }
@@ -1939,27 +1970,26 @@ document.querySelectorAll('[data-back]').forEach(b => onTap(b, () => { Sound.pla
 
 /* ----- animals panel ----- */
 function buildPanel() {
-  const panel = $('panel');
+  const panel = $('panel'), size = CONFIG.animalButtonSize;
   panel.textContent = ''; panel.scrollTop = 0;
   for (const sp of G.level.species) {
-    const row = el('div', 'row');
     const icon = el('div', 'icon');
-    icon.appendChild(animalIcon(sp, 84));
-    icon.append(el('span', 'badge price', '💰' + CONFIG.animals[sp].price), el('span', 'badge stock'));
+    icon.appendChild(animalIcon(sp, Math.round(size * 0.76)));
+    icon.appendChild(el('span', 'badge'));
     icon.dataset.species = sp;
     icon.addEventListener('pointerdown', e => startStockDrag(sp, e, icon));
-    row.appendChild(icon);
-    panel.appendChild(row);
+    panel.appendChild(icon);
   }
   refreshPanel();
 }
-/** Update the stock badges in place (never rebuild the icons: one may be mid-drag). */
+/** Update the badges in place (never rebuild the icons: one may be mid-drag).
+    The badge shows the stock number, or the price when there is no stock. */
 function refreshPanel() {
   if (!G) return;
   document.querySelectorAll('#panel .icon').forEach(icon => {
-    const n = stockCount(icon.dataset.species), badge = icon.querySelector('.badge.stock');
-    badge.textContent = String(n);
-    badge.classList.toggle('hidden', n === 0);
+    const sp = icon.dataset.species, n = stockCount(sp), badge = icon.querySelector('.badge');
+    badge.textContent = n > 0 ? String(n) : '💰' + CONFIG.animals[sp].price;
+    badge.classList.toggle('price', n === 0);
   });
 }
 $('panel').addEventListener('wheel', e => { $('panel').scrollTop += e.deltaY; }, { passive: true });
@@ -1987,21 +2017,18 @@ function updateHud() {
     ? t('goal_money', { cur: fmtMoney(pr.cur), goal: g.amount })
     : t('goal_animals', { animals: t('names_' + g.species), cur: pr.cur, goal: g.amount }));
 
-  const noPens = G.pens.length === 0;
-  if (L.noPens !== noPens) {
-    L.noPens = noPens;
-    $('btnAnimals').classList.toggle('disabled', noPens);
-    if (noPens && UI.mode === 'animals') { UI.mode = null; syncModeButtons(); }
-  }
-
   // Sell icon: only while an animal is being dragged
   const carrying = !!d && (d.kind === 'animal' || (d.kind === 'stock' && d.has && d.phase !== 'scroll'));
-  if (L.carrying !== carrying) { L.carrying = carrying; $('sell').classList.toggle('hidden', !carrying); }
+  if (L.carrying !== carrying) {      // the Sell icon takes the place of the pen buttons while carrying
+    L.carrying = carrying;
+    $('sell').classList.toggle('hidden', !carrying);
+    $('btnEdit').classList.toggle('hidden', carrying); $('btnPen').classList.toggle('hidden', carrying);
+  }
   const target = carrying ? dropTarget(d.px, d.py) : null;
   if (L.target !== target) {
     L.target = target;
     $('sell').classList.toggle('hot', target === 'sell');
-    $('btnAnimals').classList.toggle('hot', target === 'stock' && d.kind === 'animal');
+    $('panel').classList.toggle('hot', target === 'stock' && d.kind === 'animal');
   }
 
   // Trash icon: over the selected pen, only if it is empty
@@ -2021,30 +2048,35 @@ function updateHud() {
    8b. ARTIST IMAGES — optional files listed in CONFIG.art replace the placeholders
    ===================================================================== */
 const Art = {
-  loaded: {},     // species -> { idle: [Image...], walk: [Image...] }
+  lists: {},      // slot name -> file names from CONFIG.art
+  loaded: {},     // slot name -> Image objects that arrived
   timer: 0,
 
   load() {
+    const A = CONFIG.art, add = (key, files) => { this.lists[key] = files || []; this.loaded[key] = []; };
     for (const sp of CONFIG.animalOrder) {
-      const def = (CONFIG.art.animals || {})[sp] || {};
-      this.loaded[sp] = { idle: [], walk: [] };
-      for (const kind of ['idle', 'walk']) (def[kind] || []).forEach((src, i) => {
-        const im = new Image();
-        im.onload = () => { this.loaded[sp][kind][i] = im; clearTimeout(this.timer); this.timer = setTimeout(() => this.refresh(), 60); };
-        im.onerror = () => { /* missing file: the placeholder stays */ };
-        im.src = src;
-      });
+      const def = (A.animals || {})[sp] || {};
+      add('animal.' + sp + '.idle', def.idle); add('animal.' + sp + '.walk', def.walk);
     }
+    for (const name of ['grass', 'trees', 'fenceSegment', 'fencePost']) add('scenery.' + name, (A.scenery || {})[name]);
+    for (const key in this.lists) this.lists[key].forEach((src, i) => {
+      const im = new Image();
+      im.onload = () => { this.loaded[key][i] = im; clearTimeout(this.timer); this.timer = setTimeout(() => this.refresh(), 60); };
+      im.onerror = () => { /* missing file: the placeholder stays */ };
+      im.src = src;
+    });
   },
-  /** The loaded frames of a species, or null until every listed file has arrived. */
-  get(sp, kind) {
-    const want = (((CONFIG.art.animals || {})[sp] || {})[kind] || []).length;
-    const have = this.loaded[sp] ? this.loaded[sp][kind] : [];
+  /** The loaded images of a slot, or null until every listed file has arrived. */
+  list(key) {
+    const want = (this.lists[key] || []).length, have = this.loaded[key] || [];
     return want > 0 && have.filter(Boolean).length === want ? have : null;
   },
-  /** New images arrived: redraw everything that shows animals. */
+  get(sp, kind) { return this.list('animal.' + sp + '.' + kind); },   // kind: 'idle' | 'walk'
+  scenery(name) { return this.list('scenery.' + name); },             // 'grass' | 'trees' | 'fenceSegment' | 'fencePost'
+  /** New images arrived: redraw everything that shows them. */
   refresh() {
-    View.frames.clear();
+    View.frames.clear(); View.sprites.clear();
+    if (G) buildGround();
     buildMenuArt();
     if (UI.screen === 'bestiary') buildBestiary();
     if (G && !UI.drag) buildPanel();
@@ -2134,6 +2166,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 Save.load();
+document.documentElement.style.setProperty('--icon', CONFIG.animalButtonSize + 'px');
 Art.load();
 buildMenuArt();
 applyStaticStrings();
