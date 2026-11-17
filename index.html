@@ -72,7 +72,7 @@
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
     border: 2px solid rgba(0,0,0,.4); box-shadow: 0 3px 0 rgba(0,0,0,.35); font-size: 12px; font-weight: 700; cursor: pointer;
   }
-  .beast .em { font-size: 44px; line-height: 1.1; }
+  .beast .em { line-height: 0; }
   .beast.locked { background: #66705f; color: #dfe6da; box-shadow: none; }
   .beast.locked .em { filter: brightness(0); opacity: .75; }
 
@@ -95,17 +95,18 @@
   #panel.open { max-height: 100vh; }
   .row { display: flex; gap: 4px; margin-top: 6px; }
   .icon {
-    position: relative; width: 56px; height: 52px; border-radius: 10px; font-size: 30px; line-height: 1;
-    display: flex; align-items: center; justify-content: center; padding-bottom: 6px;
+    position: relative; width: 112px; height: 104px; border-radius: 14px; line-height: 1;
+    display: flex; align-items: center; justify-content: center; padding-bottom: 10px;
     background: var(--paper); border: 2px solid rgba(0,0,0,.4); box-shadow: 0 3px 0 rgba(0,0,0,.35);
     touch-action: none; cursor: grab;
   }
+  .icon canvas { pointer-events: none; }
   .badge {
-    position: absolute; right: 2px; bottom: 2px; padding: 1px 5px; border-radius: 8px;
-    font-size: 12px; font-weight: 800; line-height: 1.2; background: #2e7d32; color: #fff;
+    position: absolute; right: 5px; bottom: 5px; padding: 2px 8px; border-radius: 10px;
+    font-size: 15px; font-weight: 800; line-height: 1.2; background: #2e7d32; color: #fff;
   }
-  .badge.price { background: #b07a09; }
-  .plus { width: 48px; height: 52px; min-height: 52px; padding: 0; font-size: 24px; margin: 0 !important; }
+  .badge.price { right: auto; left: 5px; background: #b07a09; }
+  #menuAnimals { display: flex; gap: 6px; align-items: flex-end; }
 
   #topCenter { position: absolute; left: 50%; top: var(--pt); transform: translateX(-50%); width: min(38vw, 260px); text-align: center; pointer-events: none !important; text-shadow: 0 1px 2px rgba(0,0,0,.8); }
   #wbRow { display: flex; align-items: center; gap: 6px; font-weight: 800; font-size: 16px; }
@@ -147,6 +148,7 @@
   #dialog h2 { margin: 0 0 6px; font-size: 20px; }
   #dialog p { margin: 4px 0; font-size: 15px; }
   #dialog .big { font-size: 46px; line-height: 1.1; }
+  #dialog .big canvas { display: block; margin: 0 auto; }
   .dlgBtns { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 12px; }
   .dlgBtns .btn { min-width: 120px; }
   .sliderRow { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
@@ -194,7 +196,7 @@
 <!-- Menu screens -->
 <div id="menu" class="screen">
   <h1 data-i18n="title"></h1>
-  <div style="font-size:40px">🐔 🐰 🦌 🐺 🐯 🐘</div>
+  <div id="menuAnimals"></div>
   <div id="menuButtons">
     <button id="btnLevels" class="btn primary" data-i18n="menu_levels"></button>
     <button id="btnOptions" class="btn" data-i18n="menu_options"></button>
@@ -279,6 +281,7 @@ const CONFIG = {
   cornerRadiusMax: 26,
 
   // Camera
+  isoRatio: 0.56,             // tile height / tile width on screen; lower = camera closer to the ground
   maxZoom: 3,
   wheelZoomStep: 1.15,
 
@@ -286,13 +289,38 @@ const CONFIG = {
 
   // Animals: price / income per donation tick / species they fear
   animalOrder: ['chicken', 'rabbit', 'deer', 'wolf', 'tiger', 'elephant'],
+  // (size = how big the animal is drawn compared with the others)
   animals: {
-    chicken:  { emoji: '🐔', price: 20,  rate: 1,   fears: ['wolf', 'tiger'] },
-    rabbit:   { emoji: '🐰', price: 30,  rate: 1.5, fears: ['wolf', 'tiger'] },
-    deer:     { emoji: '🦌', price: 60,  rate: 3,   fears: ['wolf', 'tiger'] },
-    wolf:     { emoji: '🐺', price: 100, rate: 5,   fears: ['tiger'] },
-    tiger:    { emoji: '🐯', price: 200, rate: 10,  fears: [] },
-    elephant: { emoji: '🐘', price: 300, rate: 15,  fears: [] }
+    chicken:  { price: 20,  rate: 1,   fears: ['wolf', 'tiger'], size: 0.72 },
+    rabbit:   { price: 30,  rate: 1.5, fears: ['wolf', 'tiger'], size: 0.8 },
+    deer:     { price: 60,  rate: 3,   fears: ['wolf', 'tiger'], size: 1.05 },
+    wolf:     { price: 100, rate: 5,   fears: ['tiger'],         size: 0.95 },
+    tiger:    { price: 200, rate: 10,  fears: [],                size: 1.05 },
+    elephant: { price: 300, rate: 15,  fears: [],                size: 1.3 }
+  },
+  animalDrawSize: 1.75,       // frame height of a size-1 adult, in tile edge lengths
+
+  // ANIMAL ART — for the artist.
+  // Every animal has an "idle" list and a "walk" list of image files (one file per animation frame,
+  // played in order and looped). While a list is empty the game draws its built-in placeholder.
+  // Example:
+  //   chicken: { idle: ['art/chicken_idle.png'],
+  //              walk: ['art/chicken_walk1.png', 'art/chicken_walk2.png', 'art/chicken_walk3.png', 'art/chicken_walk4.png'] },
+  // Rules: transparent PNG (or WebP); all frames of one animal the same size; the animal stands with its
+  // feet at the bottom centre of the image; every image looks in the direction given by "facing" and the
+  // game mirrors it for the other direction. Paths are relative to index.html.
+  art: {
+    facing: 'right',          // direction the source images look: 'right' or 'left'
+    walkFps: 8,               // walk frames per second
+    idleFps: 2,               // idle frames per second
+    animals: {
+      chicken:  { idle: [], walk: [] },
+      rabbit:   { idle: [], walk: [] },
+      deer:     { idle: [], walk: [] },
+      wolf:     { idle: [], walk: [] },
+      tiger:    { idle: [], walk: [] },
+      elephant: { idle: [], walk: [] }
+    }
   },
 
   // Levels. goal.type is 'money' (reach amount) or 'animals' (adults of a species in pens)
@@ -519,7 +547,9 @@ function deletePen(pen) {
 /* ----- animals and stock ----- */
 function makeAnimal(species, adult, age, x, y) {
   return { id: G.nextId++, species, adult, age, x, y, tx: x, ty: y,
-           walking: false, timer: rand(0.3, CONFIG.restMin), held: false };
+           walking: false, timer: rand(0.3, CONFIG.restMin), held: false,
+           face: Math.random() < 0.5 ? 1 : -1,   // 1 = looking right on screen, -1 = left
+           moving: false };                      // true while it actually changes position (walk animation)
 }
 function stockCount(sp) { const s = G.stock[sp]; return s ? s.adults + s.babies.length : 0; }
 /** What the next animal taken from stock would be (adults first, then babies). */
@@ -692,6 +722,9 @@ function updatePen(p, dt) {
       if (a.walking) { tx = a.tx; ty = a.ty; } else { tx = a.x; ty = a.y; }
     }
     const dx = tx - a.x, dy = ty - a.y, dist = Math.hypot(dx, dy), step = speed * dt;
+    a.moving = dist > 1e-4;
+    // On screen, field x points down-right and field y down-left, so "right" means dx > dy.
+    if (a.moving && Math.abs(dx - dy) > 0.02) a.face = dx > dy ? 1 : -1;
     if (dist <= step) {
       a.x = tx; a.y = ty;
       if (!courting && a.walking) { a.tx = rand(p.x, p.x + p.w); a.ty = rand(p.y, p.y + p.h); }   // next waypoint
@@ -705,7 +738,7 @@ function updatePen(p, dt) {
     if (p.sadT <= 0) {
       p.sadT = C.sadIconInterval;
       const kind = p.crowded && p.scared ? (Math.random() < 0.5 ? 'crowd' : 'fear') : (p.crowded ? 'crowd' : 'fear');
-      G.particles.push({ kind, x: rand(p.x + 0.3, p.x + p.w - 0.3), y: rand(p.y + 0.3, p.y + p.h - 0.2), life: C.sadIconLife });
+      G.particles.push({ kind, x: rand(p.x + 0.3, p.x + p.w - 0.3), y: rand(p.y + 0.3, p.y + p.h - 0.3), z: 0, life: C.sadIconLife });
     }
   } else p.sadT = 0;
 }
@@ -740,7 +773,7 @@ function update(dt) {
   // Floating sad icons
   for (let i = G.particles.length - 1; i >= 0; i--) {
     const s = G.particles[i];
-    s.life -= dt; s.y -= C.sadIconSpeed * dt;
+    s.life -= dt; s.z += C.sadIconSpeed * dt;   // z = height above the ground, in cells
     if (s.life <= 0) G.particles.splice(i, 1);
   }
 
@@ -771,9 +804,9 @@ function canMoveCamera() { return UI.screen === 'game' && !UI.dialog && !UI.rota
 /* ----- two-finger zoom and pan ----- */
 function startPinch() {
   cancelDrag(); tapCandidate = null;          // a second finger cancels whatever the first was doing
-  const F = View.field, cx = (Input.x + Input.x2) / 2, cy = (Input.y + Input.y2) / 2;
+  const f = toField((Input.x + Input.x2) / 2, (Input.y + Input.y2) / 2);
   Input.pinch = { dist: Math.max(10, Math.hypot(Input.x - Input.x2, Input.y - Input.y2)), zoom: View.zoom,
-                  fx: (cx - F.x) / F.cell, fy: (cy - F.y) / F.cell };   // field point under the fingers
+                  fx: f.fx, fy: f.fy };   // field point under the fingers
 }
 function updatePinch() {
   const p = Input.pinch;
@@ -844,8 +877,8 @@ window.addEventListener('wheel', e => { if (e.ctrlKey) e.preventDefault(); }, { 
 canvas.addEventListener('wheel', e => {
   e.preventDefault();
   if (!canMoveCamera()) return;
-  const F = View.field, k = e.deltaY < 0 ? CONFIG.wheelZoomStep : 1 / CONFIG.wheelZoomStep;
-  setCamera(View.zoom * k, e.clientX, e.clientY, (e.clientX - F.x) / F.cell, (e.clientY - F.y) / F.cell);
+  const f = toField(e.clientX, e.clientY), k = e.deltaY < 0 ? CONFIG.wheelZoomStep : 1 / CONFIG.wheelZoomStep;
+  setCamera(View.zoom * k, e.clientX, e.clientY, f.fx, f.fy);
 }, { passive: false });
 
 /** Tap handler built on pointer events so it obeys the one-finger rule. */
@@ -868,36 +901,40 @@ function pointIn(el, x, y) {
 /** Screen pixels -> field coordinates (fx, fy in cells; cx, cy whole cell indices). */
 function toField(px, py) {
   const F = View.field;
-  const fx = (px - F.x) / F.cell, fy = (py - F.y) / F.cell;
+  const a = (px - F.ox) / (F.tw / 2), b = (py - F.oy) / (F.th / 2);   // inverse of sx()/sy()
+  const fx = (a + b) / 2, fy = (b - a) / 2;
   return { fx, fy, cx: Math.floor(fx), cy: Math.floor(fy) };
 }
 const cellInField = (cx, cy) => cx >= 0 && cy >= 0 && cx < G.cols && cy < G.rows;
 
 /* ----- what is under the finger ----- */
 function findAnimal(px, py) {
-  const F = View.field, f = toField(px, py), under = penAtCell(f.cx, f.cy);
-  const inside = Math.max(CONFIG.pickRadius, F.cell * 0.5), outside = F.cell * 0.35;
+  const c = View.field.cell;
+  const f1 = toField(px, py), f2 = toField(px, py + c * 0.4);      // the body is drawn above the feet
+  const u1 = penAtCell(f1.cx, f1.cy), u2 = penAtCell(f2.cx, f2.cy);
+  const inside = Math.max(CONFIG.pickRadius, c * 0.5), outside = c * 0.35;
   let best = null;
   for (const p of G.pens) {
-    const limit = p === under ? inside : outside;   // be strict when the finger is not in the animal's pen
+    const limit = (p === u1 || p === u2) ? inside : outside;   // be strict when the finger is not on the animal's pen
     for (const a of p.animals) {
-      const d = Math.hypot(F.x + a.x * F.cell - px, F.y + a.y * F.cell - py);
+      const lift = animalBox(a.species) * animalScale(a) * 0.3;     // aim at the body centre
+      const d = Math.hypot(sx(a.x, a.y) - px, sy(a.x, a.y) - lift - py);
       if (d < limit && (!best || d < best.dist)) best = { pen: p, animal: a, dist: d };
     }
   }
   return best;
 }
-/** Pixel positions of a pen's four corner handles (drawn slightly inside the pen). */
+/** Screen positions of a pen's four corner handles (drawn slightly inside the pen). */
 function handlePoints(p) {
-  const F = View.field, inset = Math.min(F.cell * 0.28, 12);
-  const x0 = F.x + p.x * F.cell + inset, x1 = F.x + (p.x + p.w) * F.cell - inset;
-  const y0 = F.y + p.y * F.cell + inset, y1 = F.y + (p.y + p.h) * F.cell - inset;
+  const i = Math.min(0.3, 12 / View.field.cell);
+  const x0 = p.x + i, x1 = p.x + p.w - i, y0 = p.y + i, y1 = p.y + p.h - i;
   // each handle remembers the cell of the opposite (fixed) corner
+  const H = (x, y, fx, fy) => ({ x: sx(x, y), y: sy(x, y), fx, fy });
   return [
-    { x: x0, y: y0, fx: p.x + p.w - 1, fy: p.y + p.h - 1 },
-    { x: x1, y: y0, fx: p.x,           fy: p.y + p.h - 1 },
-    { x: x0, y: y1, fx: p.x + p.w - 1, fy: p.y },
-    { x: x1, y: y1, fx: p.x,           fy: p.y }
+    H(x0, y0, p.x + p.w - 1, p.y + p.h - 1),
+    H(x1, y0, p.x,           p.y + p.h - 1),
+    H(x0, y1, p.x + p.w - 1, p.y),
+    H(x1, y1, p.x,           p.y)
   ];
 }
 function findHandle(px, py) {
@@ -911,14 +948,14 @@ function findHandle(px, py) {
 
 /** Normal play: a press inside a pen, close to one of its corners, grabs that corner. */
 function findCorner(px, py) {
-  const F = View.field, f = toField(px, py), p = penAtCell(f.cx, f.cy);
+  const c = View.field.cell, f = toField(px, py), p = penAtCell(f.cx, f.cy);
   if (!p) return null;
-  const r = Math.min(clamp(F.cell * 0.4, CONFIG.cornerRadiusMin, CONFIG.cornerRadiusMax), F.cell * 0.45);
-  const xs = [F.x + p.x * F.cell, F.x + (p.x + p.w) * F.cell], ys = [F.y + p.y * F.cell, F.y + (p.y + p.h) * F.cell];
+  const r = Math.min(clamp(c * 0.4, CONFIG.cornerRadiusMin, CONFIG.cornerRadiusMax), c * 0.45);
+  const xs = [p.x, p.x + p.w], ys = [p.y, p.y + p.h];
   const hs = handlePoints(p);
   let best = null;
   for (let i = 0; i < 4; i++) {
-    const d = Math.hypot(xs[i % 2] - px, ys[i >> 1] - py);
+    const d = Math.hypot(sx(xs[i % 2], ys[i >> 1]) - px, sy(xs[i % 2], ys[i >> 1]) - py);
     if (d < r && (!best || d < best.dist)) best = { pen: p, fx: hs[i].fx, fy: hs[i].fy, dist: d };
   }
   return best;
@@ -954,7 +991,7 @@ canvas.addEventListener('pointerdown', e => {
   // Normal play: grab an animal, grab a pen corner, or start a new pen on empty grass.
   const hit = findAnimal(px, py), corner = findCorner(px, py);
   if (hit && (!corner || hit.dist <= corner.dist)) {
-    hit.animal.held = true;
+    hit.animal.held = true; hit.animal.moving = false;
     if (hit.pen.court && (hit.pen.court.a === hit.animal || hit.pen.court.b === hit.animal)) cancelCourtship(hit.pen);
     UI.drag = { kind: 'animal', pen: hit.pen, animal: hit.animal, species: hit.animal.species, px, py };
     Sound.play('tap');
@@ -968,7 +1005,8 @@ function startStockDrag(sp, e, iconEl) {
   try { iconEl.setPointerCapture(e.pointerId); } catch (err) { /* not critical */ }
   const next = peekStock(sp);
   UI.drag = { kind: 'stock', species: sp, has: !!next, adult: next ? next.adult : true, age: next ? next.age : 0,
-              sx: e.clientX, sy: e.clientY, px: e.clientX, py: e.clientY, moved: false };
+              sx: e.clientX, sy: e.clientY, px: e.clientX, py: e.clientY,
+              phase: 'press' };   // 'press' -> 'scroll' (sliding the icon column) or 'carry' (dragging the animal out)
   if (next) Sound.play('tap');
 }
 
@@ -980,7 +1018,7 @@ function dragMove(px, py) {
     const f = toField(px, py); d.cx = f.cx; d.cy = f.cy;
     if (!d.armed && Math.hypot(px - d.px0, py - d.py0) > CONFIG.tapSlop) d.armed = true;
   } else if (d.kind === 'pan') {
-    View.field.x += px - d.px; View.field.y += py - d.py;
+    View.field.ox += px - d.px; View.field.oy += py - d.py;
     d.px = px; d.py = py;
     clampCamera();
   } else if (d.kind === 'corner') {
@@ -991,10 +1029,17 @@ function dragMove(px, py) {
     // The pen reshapes live while the shape is valid; otherwise it shows its old shape plus a red ghost.
     Object.assign(d.pen, d.valid ? d.rect : d.orig);
   } else if (d.kind === 'stock') {
-    const panel = $('panel');
-    if (pointIn(panel, px, py)) panel.scrollTop -= (py - d.py);   // manual scroll of the icon column
+    const panel = $('panel'), dx = px - d.sx, dy = py - d.sy;
+    if (d.phase === 'press' && Math.hypot(dx, dy) > CONFIG.tapSlop) {
+      // a mostly vertical slide scrolls the icon column (if it has anything to scroll)
+      const canScroll = panel.scrollHeight > panel.clientHeight + 1;
+      d.phase = canScroll && Math.abs(dy) > Math.abs(dx) ? 'scroll' : 'carry';
+    }
+    if (d.phase === 'scroll') {
+      if (pointIn(panel, px, py)) panel.scrollTop -= (py - d.py);
+      else d.phase = 'carry';          // left the column: now it is a drag
+    }
     d.px = px; d.py = py;
-    if (Math.hypot(px - d.sx, py - d.sy) > CONFIG.tapSlop) d.moved = true;
   } else if (d.kind === 'animal') {
     d.px = px; d.py = py;
   }
@@ -1049,8 +1094,8 @@ function dragEnd(px, py) {
       if (pen && moveAnimal(d.pen, pen, d.animal, f.fx, f.fy)) Sound.play('drop');
     }
   } else if (d.kind === 'stock') {
-    if (!d.has) { if (!d.moved) openPurchase(d.species); return; }
-    if (!d.moved) return;
+    if (d.phase === 'press') { openPurchase(d.species); return; }   // a tap on the icon opens the shop
+    if (d.phase !== 'carry' || !d.has) return;
     const target = dropTarget(px, py);
     if (target === 'sell') { openSellConfirm(d.species, d.adult, () => sellFromStock(d.species)); return; }
     if (target === 'stock') return;
@@ -1073,19 +1118,38 @@ function cancelDrag() {
 
 /* =====================================================================
    7. RENDERING — canvas only, reads state, never changes it
+   The world is drawn in an angled orthographic ("isometric") view:
+   field x runs down-right on screen, field y runs down-left.
    ===================================================================== */
 const View = {
   w: 0, h: 0, dpr: 1,
-  field: { x: 0, y: 0, cell: 32 },     // where the grid is on screen right now (includes zoom and pan)
-  base: { cell: 32 },                  // cell size at zoom 1 (whole field fits)
+  field: { ox: 0, oy: 0, tw: 64, th: 36, cell: 36 },   // ox/oy: screen position of field corner (0,0);
+                                                       // tw/th: tile diamond size; cell: tile edge length in px
+  base: { tw: 64 },                    // tile width at zoom 1 (whole field fits)
   area: { x: 0, y: 0, w: 1, h: 1 },    // screen area between the floating UI
   zoom: 1,
   spriteCell: 0,
-  grass: null,             // pre-rendered grass tiles
-  sprites: new Map()       // emoji -> pre-rendered canvas (much faster than fillText per frame)
+  grass: null, grassRim: 0,            // pre-rendered field
+  trees: [],                           // decoration around the field
+  sprites: new Map(),                  // key -> pre-rendered canvas (emoji icons, trees)
+  frames: new Map()                    // species -> pre-rendered animation frames
 };
 const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
 const ICON = { heart: '❤️', crowd: '😫', fear: '😱' };
+const TAU = Math.PI * 2;
+
+/** Field coordinates -> screen pixels. */
+const sx = (fx, fy) => View.field.ox + (fx - fy) * View.field.tw / 2;
+const sy = (fx, fy) => View.field.oy + (fx + fy) * View.field.th / 2;
+function setTileSize(tw) {
+  const F = View.field;
+  F.tw = tw; F.th = tw * CONFIG.isoRatio; F.cell = Math.hypot(F.tw, F.th) / 2;
+}
+function makeCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h));
+  return c;
+}
 
 function resize() {
   View.w = window.innerWidth; View.h = window.innerHeight;
@@ -1098,7 +1162,7 @@ function resize() {
   layoutField();
 }
 
-/** Fit the grid between the floating UI and pre-render the grass. */
+/** Fit the whole field between the floating UI and pre-render the ground. */
 function layoutField() {
   if (!G) return;
   let side = 0;
@@ -1106,73 +1170,264 @@ function layoutField() {
   if (!(side > 0)) side = 110;
   side += 8;
   const tc = $('topCenter').getBoundingClientRect();
-  const top = (tc.height > 0 ? tc.bottom : 52) + 6;
+  const headroom = 14;                               // room above the back corner for fences and animals
+  const top = (tc.height > 0 ? tc.bottom : 52) + 6 + headroom;
   const lc = $('leftCol').getBoundingClientRect();
-  const bottom = lc.height > 0 ? Math.max(8, View.h - lc.bottom) : 8;
+  const bottom = (lc.height > 0 ? Math.max(8, View.h - lc.bottom) : 8) + 6;
   const availW = View.w - 2 * side, availH = View.h - top - bottom;
-  const cell = Math.max(10, Math.floor(Math.min(availW / G.cols, availH / G.rows)));
-  View.base = { cell };
+  const n = (G.cols + G.rows) / 2;                   // the field diamond is n tiles wide and n tiles tall
+  const tw = Math.max(16, Math.floor(Math.min(availW / n, availH / (n * CONFIG.isoRatio))));
+  View.base = { tw };
   View.area = { x: side, y: top, w: availW, h: availH };
   View.zoom = 1;
-  View.field = { cell, x: 0, y: 0 };
+  setTileSize(tw);
   clampCamera();
-
-  // Grass tiles, drawn once (extra resolution so they stay crisp when zoomed in).
-  const g = document.createElement('canvas');
-  const s = cell * Math.min(View.dpr * 2, 2048 / (cell * G.cols));
-  g.width = Math.ceil(G.cols * s); g.height = Math.ceil(G.rows * s);
-  const gx = g.getContext('2d');
-  for (let y = 0; y < G.rows; y++) for (let x = 0; x < G.cols; x++) {
-    gx.fillStyle = (x + y) % 2 ? '#69bd49' : '#61b443';
-    gx.fillRect(x * s, y * s, s + 1, s + 1);
-    gx.strokeStyle = 'rgba(40,110,30,.55)'; gx.lineWidth = Math.max(1, s * 0.035);
-    for (let k = 0; k < 3; k++) {        // a few grass tufts per tile
-      const bx = (x + 0.15 + 0.7 * Math.random()) * s, by = (y + 0.25 + 0.6 * Math.random()) * s;
-      gx.beginPath(); gx.moveTo(bx, by); gx.lineTo(bx - s * 0.04, by - s * 0.12);
-      gx.moveTo(bx, by); gx.lineTo(bx + s * 0.05, by - s * 0.1); gx.stroke();
-    }
-  }
-  View.grass = g;
-  View.sprites.clear();
+  buildGround();
+  buildTrees();
+  View.sprites.clear(); View.frames.clear(); View.spriteCell = View.field.cell;
 }
 
-/** Zoom to `zoom` so that field point (fx, fy) sits at screen point (sx, sy). */
-function setCamera(zoom, sx, sy, fx, fy) {
+/** Zoom to `zoom` so that field point (fx, fy) sits at screen point (px, py). */
+function setCamera(zoom, px, py, fx, fy) {
   View.zoom = clamp(zoom, 1, CONFIG.maxZoom);
+  setTileSize(View.base.tw * View.zoom);
   const F = View.field;
-  F.cell = View.base.cell * View.zoom;
-  F.x = sx - fx * F.cell; F.y = sy - fy * F.cell;
+  F.ox = px - (fx - fy) * F.tw / 2; F.oy = py - (fx + fy) * F.th / 2;
   clampCamera();
 }
-/** Keep the field centred while it fits, otherwise never show empty space beyond its edges. */
+/** Keep the field centred while it fits, otherwise never scroll past its edges. */
 function clampCamera() {
   if (!G) return;
-  const F = View.field, A = View.area, W = G.cols * F.cell, H = G.rows * F.cell;
-  F.x = W <= A.w ? A.x + (A.w - W) / 2 : clamp(F.x, A.x + A.w - W, A.x);
-  F.y = H <= A.h ? A.y + (A.h - H) / 2 : clamp(F.y, A.y + A.h - H, A.y);
+  const F = View.field, A = View.area, n = (G.cols + G.rows) / 2, W = n * F.tw, H = n * F.th;
+  let left = F.ox - G.rows * F.tw / 2, top = F.oy;
+  left = W <= A.w ? A.x + (A.w - W) / 2 : clamp(left, A.x + A.w - W, A.x);
+  top = H <= A.h ? A.y + (A.h - H) / 2 : clamp(top, A.y + A.h - H, A.y);
+  F.ox = left + G.rows * F.tw / 2; F.oy = top;
 }
 
-function sprite(emoji) {
-  let s = View.sprites.get(emoji);
+/** Grass tiles with an earth rim, drawn once per layout at extra resolution. */
+function buildGround() {
+  const n = (G.cols + G.rows) / 2, tw = View.base.tw, th = tw * CONFIG.isoRatio;
+  const W = n * tw, H = n * th, rim = Math.max(5, th * 0.28);
+  const k = Math.min(View.dpr * 2, 2048 / W);
+  const cv = makeCanvas(W * k, (H + rim) * k), g = cv.getContext('2d');
+  g.scale(k, k);
+  const X = (fx, fy) => G.rows * tw / 2 + (fx - fy) * tw / 2, Y = (fx, fy) => (fx + fy) * th / 2;
+  const quad = (x0, y0, x1, y1) => {
+    g.beginPath(); g.moveTo(X(x0, y0), Y(x0, y0)); g.lineTo(X(x1, y0), Y(x1, y0));
+    g.lineTo(X(x1, y1), Y(x1, y1)); g.lineTo(X(x0, y1), Y(x0, y1)); g.closePath();
+  };
+  // earth rim below the two front edges gives the field some thickness
+  const c = G.cols, r = G.rows;
+  g.beginPath(); g.moveTo(X(0, r), Y(0, r)); g.lineTo(X(0, r), Y(0, r) + rim); g.lineTo(X(c, r), Y(c, r) + rim);
+  g.lineTo(X(c, 0), Y(c, 0) + rim); g.lineTo(X(c, 0), Y(c, 0)); g.closePath();
+  g.fillStyle = '#7a5a34'; g.fill();
+  g.beginPath(); g.moveTo(X(c, r), Y(c, r)); g.lineTo(X(c, r), Y(c, r) + rim); g.lineTo(X(c, 0), Y(c, 0) + rim); g.lineTo(X(c, 0), Y(c, 0)); g.closePath();
+  g.fillStyle = '#684b2a'; g.fill();
+  // grass
+  quad(0, 0, c, r); g.fillStyle = '#6cc04b'; g.fill();
+  g.fillStyle = '#62b644';
+  for (let y = 0; y < r; y++) for (let x = (y + 1) % 2; x < c; x += 2) { quad(x, y, x + 1, y + 1); g.fill(); }
+  g.strokeStyle = 'rgba(40,110,30,.6)'; g.lineWidth = Math.max(1, tw * 0.02); g.lineCap = 'round';
+  for (let y = 0; y < r; y++) for (let x = 0; x < c; x++) for (let i = 0; i < 2; i++) {   // grass tufts
+    const fx = x + 0.2 + 0.6 * Math.random(), fy = y + 0.2 + 0.6 * Math.random(), bx = X(fx, fy), by = Y(fx, fy);
+    g.beginPath(); g.moveTo(bx, by); g.lineTo(bx - tw * 0.025, by - tw * 0.07);
+    g.moveTo(bx, by); g.lineTo(bx + tw * 0.03, by - tw * 0.06); g.stroke();
+  }
+  quad(0, 0, c, r); g.strokeStyle = '#4f9a36'; g.lineWidth = Math.max(1.5, tw * 0.03); g.stroke();
+  View.grass = cv; View.grassRim = rim;
+}
+
+/** Scatter a few trees around the field (same layout every time for a given level). */
+function buildTrees() {
+  let seed = 12345 + G.levelIdx * 977;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const list = [];
+  const add = (fx, fy) => list.push({ fx, fy, kind: rnd() < 0.5 ? 'tree' : 'pine', size: 0.85 + 0.4 * rnd() });
+  for (let i = 0; i < 9; i++) add(-1 - 4 * rnd(), -4 + (G.rows + 6) * rnd());      // behind the left edge
+  for (let i = 0; i < 9; i++) add(-4 + (G.cols + 6) * rnd(), -1 - 4 * rnd());      // behind the right edge
+  for (let i = 0; i < 4; i++) add(G.cols + 3.5 + 2 * rnd(), G.rows * rnd());       // far in front
+  for (let i = 0; i < 4; i++) add(G.cols * rnd(), G.rows + 3.5 + 2 * rnd());
+  list.sort((a, b) => (a.fx + a.fy) - (b.fx + b.fy));
+  View.trees = list;
+}
+
+/* ----- generated placeholder art (the artist replaces animals via CONFIG.art) ----- */
+const OUTLINE = '#3b2a1a';
+const CRITTERS = {   // proportions of the placeholder animals, in a 1 × 1 box, facing right
+  rabbit:   { body: '#efe7dc', dark: '#cfc4b4', bw: .23, bh: .17, leg: .10, legW: .075, head: .125, hx: .21, hy: -.13, ear: 'long',  tail: 'puff' },
+  deer:     { body: '#bd7c40', dark: '#955f2e', bw: .25, bh: .135, leg: .33, legW: .05, head: .095, hx: .30, hy: -.25, ear: 'leaf',  tail: 'short', belly: '#efdcba', neck: true, antlers: true, snout: .06 },
+  wolf:     { body: '#939aa3', dark: '#6d737c', bw: .27, bh: .14, leg: .23, legW: .06, head: .115, hx: .29, hy: -.10, ear: 'point', tail: 'bushy', snout: .10, snoutCol: '#c9ced4' },
+  tiger:    { body: '#f59b2c', dark: '#cc7a17', bw: .29, bh: .15, leg: .19, legW: .075, head: .135, hx: .29, hy: -.09, ear: 'round', tail: 'long',  stripes: true, snout: .055, snoutCol: '#fff1dc' },
+  elephant: { body: '#a2abb5', dark: '#7f8893', bw: .29, bh: .22, leg: .21, legW: .115, head: .17, hx: .25, hy: -.07, ear: 'big',   tail: 'thin',  trunk: true }
+};
+
+/** Draw one placeholder animal frame. g is scaled so the box is 1 × 1; feet stand at y = 0.95. */
+function drawCritter(g, sp, phase, walking) {
+  const ground = 0.95;
+  const sw = walking ? Math.sin(phase) : 0;
+  const bob = walking ? Math.abs(Math.cos(phase)) * 0.014 : (phase ? 0.008 : 0);
+  const pen = () => { g.lineWidth = 0.017; g.strokeStyle = OUTLINE; };
+  g.lineJoin = g.lineCap = 'round'; pen();
+  const ell = (x, y, rx, ry, fill, rot) => { g.beginPath(); g.ellipse(x, y, rx, ry, rot || 0, 0, TAU); g.fillStyle = fill; g.fill(); g.stroke(); };
+  const poly = (pts, fill) => { g.beginPath(); g.moveTo(pts[0], pts[1]); for (let i = 2; i < pts.length; i += 2) g.lineTo(pts[i], pts[i + 1]); g.closePath(); g.fillStyle = fill; g.fill(); g.stroke(); };
+  const curve = (p, w, col) => {    // thick outlined curve: start, control, end
+    for (const [lw, c] of [[w + 0.034, OUTLINE], [w, col]]) {
+      g.beginPath(); g.moveTo(p[0], p[1]); g.quadraticCurveTo(p[2], p[3], p[4], p[5]); g.lineWidth = lw; g.strokeStyle = c; g.stroke();
+    }
+    pen();
+  };
+  const dot = (x, y, r, col) => { g.beginPath(); g.arc(x, y, r, 0, TAU); g.fillStyle = col; g.fill(); };
+
+  if (sp === 'chicken') {
+    const bx = 0.45, by = 0.62 - bob, hipY = by + 0.13;
+    for (const [x, a] of [[bx - 0.05, sw * 0.55], [bx + 0.05, -sw * 0.55]]) {       // legs
+      g.save(); g.translate(x, hipY); g.rotate(a);
+      g.strokeStyle = '#e08a1e'; g.lineWidth = 0.032;
+      g.beginPath(); g.moveTo(0, 0); g.lineTo(0, ground - hipY); g.lineTo(0.065, ground - hipY); g.stroke();
+      g.restore();
+    }
+    pen();
+    poly([bx - 0.12, by - 0.08, bx - 0.31, by - 0.22, bx - 0.27, by - 0.05, bx - 0.33, by + 0.02, bx - 0.15, by + 0.06], '#f3e9d8');   // tail feathers
+    ell(bx, by, 0.2, 0.17, '#fffaf0');
+    ell(bx - 0.03, by + 0.02, 0.11, 0.075, '#ece0cc', 0.3);                          // wing
+    const hx = bx + 0.17, hy = by - 0.21;
+    for (const dx of [-0.045, 0.005, 0.055]) ell(hx + dx, hy - 0.09, 0.036, 0.046, '#e23b2e');   // comb
+    ell(hx + 0.075, hy + 0.085, 0.026, 0.042, '#e23b2e');                            // wattle
+    poly([hx + 0.07, hy - 0.035, hx + 0.2, hy + 0.01, hx + 0.07, hy + 0.05], '#f2a81d');          // beak
+    ell(hx, hy, 0.1, 0.1, '#fffaf0');
+    dot(hx + 0.04, hy - 0.02, 0.02, OUTLINE);
+    return;
+  }
+
+  const s = CRITTERS[sp];
+  const bx = 0.44, by = ground - s.leg - s.bh * 0.7 - bob, hip = by + s.bh * 0.35, L = ground - hip, A = 0.45 * sw;
+  const leg = (x, ang, col) => {
+    g.save(); g.translate(x, hip); g.rotate(ang);
+    g.beginPath(); g.rect(-s.legW / 2, 0, s.legW, L); g.fillStyle = col; g.fill(); g.stroke();
+    g.restore();
+  };
+  leg(bx + s.bw * 0.52, -A, s.dark); leg(bx - s.bw * 0.62, A, s.dark);               // far legs
+
+  const tx = bx - s.bw * 0.92, ty = by - s.bh * 0.2;                                 // tail
+  if (s.tail === 'puff') ell(tx - 0.02, ty + 0.02, 0.055, 0.055, '#ffffff');
+  else if (s.tail === 'short') ell(tx - 0.015, ty - 0.03, 0.03, 0.055, s.belly, -0.6);
+  else if (s.tail === 'bushy') ell(tx - 0.07, ty + 0.06, 0.13, 0.055, s.dark, -0.6);
+  else if (s.tail === 'long') curve([tx + 0.02, ty, tx - 0.17, ty + 0.14, tx - 0.2, ty - 0.1], 0.04, s.body);
+  else if (s.tail === 'thin') curve([tx + 0.01, ty, tx - 0.05, ty + 0.08, tx - 0.03, ty + 0.2], 0.018, s.dark);
+
+  ell(bx, by, s.bw, s.bh, s.body);                                                   // body
+  if (s.belly || s.stripes) {
+    g.save(); g.beginPath(); g.ellipse(bx, by, s.bw - 0.008, s.bh - 0.008, 0, 0, TAU); g.clip();
+    if (s.belly) { g.beginPath(); g.ellipse(bx, by + s.bh * 0.95, s.bw * 0.9, s.bh * 0.6, 0, 0, TAU); g.fillStyle = s.belly; g.fill(); }
+    if (s.stripes) {
+      g.strokeStyle = '#3b2a1a'; g.lineWidth = 0.03;
+      for (const k of [-0.6, -0.25, 0.1, 0.45]) { g.beginPath(); g.moveTo(bx + k * s.bw, by - s.bh); g.lineTo(bx + k * s.bw - 0.035, by + s.bh * 0.15); g.stroke(); }
+    }
+    g.restore(); pen();
+  }
+  leg(bx + s.bw * 0.72, A, s.body); leg(bx - s.bw * 0.42, -A, s.body);               // near legs
+
+  const hx = bx + s.hx, hy = by + s.hy, r = s.head;                                  // head
+  if (s.neck) curve([bx + s.bw * 0.62, by - s.bh * 0.25, hx - 0.03, by - s.bh * 0.6, hx - 0.01, hy + 0.02], 0.085, s.body);
+  if (s.ear === 'long') { ell(hx - 0.04, hy - r - 0.06, 0.032, 0.105, s.body, -0.28); ell(hx + 0.02, hy - r - 0.07, 0.032, 0.105, s.body, -0.1); }
+  else if (s.ear === 'leaf') ell(hx - r * 0.85, hy - r * 0.75, 0.055, 0.028, s.body, 0.5);
+  else if (s.ear === 'point') { poly([hx - r * 0.9, hy - r * 0.35, hx - r * 0.55, hy - r * 1.6, hx - r * 0.05, hy - r * 0.85], s.dark); poly([hx - r * 0.3, hy - r * 0.7, hx + r * 0.15, hy - r * 1.6, hx + r * 0.5, hy - r * 0.75], s.body); }
+  else if (s.ear === 'round') { ell(hx - r * 0.6, hy - r * 0.8, r * 0.36, r * 0.36, s.dark); ell(hx + r * 0.25, hy - r * 0.92, r * 0.34, r * 0.34, s.body); }
+  if (s.trunk) curve([hx + r * 0.55, hy + r * 0.15, hx + r * 1.6, hy + r * 0.7, hx + r * 1.1, ground - 0.13 - bob], 0.075, s.body);
+  if (s.snout) { ell(hx + r * 0.78, hy + r * 0.28, s.snout, r * 0.52, s.snoutCol || s.body); dot(hx + r * 0.78 + s.snout * 0.8, hy + r * 0.1, 0.02, OUTLINE); }
+  ell(hx, hy, r, r, s.body);
+  if (sp === 'rabbit') dot(hx + r * 0.92, hy + 0.01, 0.018, '#e58aa0');
+  dot(hx + r * 0.4, hy - r * 0.2, 0.02, OUTLINE);                                    // eye
+  if (s.ear === 'big') ell(hx - r * 0.5, hy - r * 0.05, r * 0.62, r * 0.85, s.dark);
+  if (s.trunk) { g.beginPath(); g.moveTo(hx + r * 0.7, hy + r * 0.55); g.lineTo(hx + r * 1.15, hy + r * 0.95); g.lineWidth = 0.03; g.strokeStyle = '#fffdf5'; g.stroke(); pen(); }
+  if (s.antlers) {
+    g.strokeStyle = '#7a5a35'; g.lineWidth = 0.024;
+    g.beginPath(); g.moveTo(hx - 0.01, hy - r * 0.85); g.lineTo(hx - 0.05, hy - r - 0.15);
+    g.moveTo(hx - 0.03, hy - r - 0.07); g.lineTo(hx + 0.04, hy - r - 0.12);
+    g.moveTo(hx - 0.04, hy - r - 0.11); g.lineTo(hx - 0.11, hy - r - 0.13); g.stroke(); pen();
+  }
+}
+
+function drawTree(g, kind) {   // 1 × 1 box, trunk base at y = 0.96
+  g.lineJoin = 'round'; g.lineWidth = 0.018; g.strokeStyle = '#27441f';
+  g.fillStyle = '#7a5230'; g.fillRect(0.45, 0.66, 0.1, 0.3); g.strokeRect(0.45, 0.66, 0.1, 0.3);
+  if (kind === 'pine') {
+    for (const [y, w, c] of [[0.78, 0.3, '#2f7d3a'], [0.58, 0.25, '#368a42'], [0.4, 0.19, '#3f9a4c']]) {
+      g.beginPath(); g.moveTo(0.5 - w, y); g.lineTo(0.5, y - 0.3); g.lineTo(0.5 + w, y); g.closePath(); g.fillStyle = c; g.fill(); g.stroke();
+    }
+  } else {
+    for (const [x, y, r, c] of [[0.33, 0.52, 0.19, '#3f9440'], [0.67, 0.52, 0.19, '#3f9440'], [0.5, 0.38, 0.27, '#55b14c']]) {
+      g.beginPath(); g.arc(x, y, r, 0, TAU); g.fillStyle = c; g.fill(); g.stroke();
+    }
+  }
+}
+
+/* ----- sprite caches ----- */
+function sprite(key, draw) {
+  let s = View.sprites.get(key);
   if (!s) {
-    const size = Math.ceil(Math.max(View.field.cell, 48) * View.dpr * 1.25);
-    s = document.createElement('canvas'); s.width = s.height = size;
-    const x = s.getContext('2d');
-    x.font = Math.floor(size * 0.7) + 'px ' + EMOJI_FONT;
-    x.textAlign = 'center'; x.textBaseline = 'middle';
-    x.fillText(emoji, size / 2, size / 2 + size * 0.05);
-    View.sprites.set(emoji, s);
+    const size = Math.min(384, Math.ceil(Math.max(View.field.cell, 48) * View.dpr * 1.25));
+    s = makeCanvas(size, size);
+    draw(s.getContext('2d'), size);
+    View.sprites.set(key, s);
   }
   return s;
 }
+function emojiSprite(emoji) {
+  return sprite(emoji, (x, size) => {
+    x.font = Math.floor(size * 0.7) + 'px ' + EMOJI_FONT;
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText(emoji, size / 2, size / 2 + size * 0.05);
+  });
+}
 /** Draw an emoji sprite centred on (x, y) in a box of `size` CSS pixels. */
 function drawEmoji(emoji, x, y, size) {
-  ctx.drawImage(sprite(emoji), x - size / 2, y - size / 2, size, size);
+  ctx.drawImage(emojiSprite(emoji), x - size / 2, y - size / 2, size, size);
 }
+
+/** Animation frames of one species, pre-rendered as square canvases with the feet at the bottom centre. */
+function animalFrames(sp) {
+  let f = View.frames.get(sp);
+  if (f) return f;
+  const size = Math.min(320, Math.ceil(animalBox(sp) * View.dpr));
+  const make = draw => { const c = makeCanvas(size, size); draw(c.getContext('2d')); return c; };
+  const fromImage = im => make(g => {
+    const k = Math.min(size / im.width, size / im.height), w = im.width * k, h = im.height * k;
+    g.drawImage(im, (size - w) / 2, size - h, w, h);
+  });
+  const generated = (phase, walking) => make(g => { g.scale(size, size); drawCritter(g, sp, phase, walking); });
+  const idleArt = Art.get(sp, 'idle'), walkArt = Art.get(sp, 'walk'), custom = !!(idleArt || walkArt);
+  f = {
+    idle: idleArt ? idleArt.map(fromImage) : walkArt ? [fromImage(walkArt[0])] : [generated(0, false), generated(1, false)],
+    walk: walkArt ? walkArt.map(fromImage) : idleArt ? null : [0, 1, 2, 3].map(i => generated(i * Math.PI / 2, true)),
+    foot: custom ? 1 : 0.95,                                               // where the feet are inside the frame
+    mirrorWhen: custom && CONFIG.art.facing === 'left' ? 1 : -1            // flip the frame when the animal faces this way
+  };
+  if (!f.walk) f.walk = f.idle;
+  View.frames.set(sp, f);
+  return f;
+}
+/** Size of an adult animal's frame on screen, in CSS pixels. */
+function animalBox(sp) { return Math.max(View.field.cell * CONFIG.animalDrawSize, 30) * CONFIG.animals[sp].size; }
 function animalScale(a) {
   if (a.adult) return 1;
   return CONFIG.babyScale + (1 - CONFIG.babyScale) * clamp(a.age / CONFIG.growTime, 0, 1);
 }
+/** Draw an animal standing on screen point (x, y). face: 1 = looking right, -1 = looking left. */
+function drawAnimal(sp, x, y, box, face, walking, seed) {
+  const f = animalFrames(sp), frames = walking ? f.walk : f.idle;
+  const fps = walking ? CONFIG.art.walkFps : CONFIG.art.idleFps;
+  const img = frames[Math.floor(G.time * fps + seed * 0.37) % frames.length];
+  const top = y - box * f.foot;
+  if (face === f.mirrorWhen) {
+    ctx.save(); ctx.translate(x, 0); ctx.scale(-1, 1);
+    ctx.drawImage(img, -box / 2, top, box, box);
+    ctx.restore();
+  } else ctx.drawImage(img, x - box / 2, top, box, box);
+}
+
+/* ----- drawing helpers ----- */
 function label(text, x, y, color) {
   ctx.font = '800 15px system-ui, sans-serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -1180,64 +1435,93 @@ function label(text, x, y, color) {
   ctx.strokeText(text, x, y);
   ctx.fillStyle = color || '#fff'; ctx.fillText(text, x, y);
 }
-function penPx(r) {
-  const F = View.field;
-  return { x: F.x + r.x * F.cell, y: F.y + r.y * F.cell, w: r.w * F.cell, h: r.h * F.cell };
+/** Trace a cell rectangle (a diamond on screen) as the current path. */
+function rectPath(r) {
+  const x0 = r.x, y0 = r.y, x1 = r.x + r.w, y1 = r.y + r.h;
+  ctx.beginPath();
+  ctx.moveTo(sx(x0, y0), sy(x0, y0)); ctx.lineTo(sx(x1, y0), sy(x1, y0));
+  ctx.lineTo(sx(x1, y1), sy(x1, y1)); ctx.lineTo(sx(x0, y1), sy(x0, y1));
+  ctx.closePath();
 }
+function rectCentre(r) { return { x: sx(r.x + r.w / 2, r.y + r.h / 2), y: sy(r.x + r.w / 2, r.y + r.h / 2) }; }
 
-function drawPen(p, tint) {
-  const c = View.field.cell, r = penPx(p);
-  ctx.fillStyle = 'rgba(226,202,138,.62)';               // trodden ground
-  ctx.fillRect(r.x, r.y, r.w, r.h);
-  if (p.crowded || p.scared) { ctx.fillStyle = 'rgba(220,40,30,.16)'; ctx.fillRect(r.x, r.y, r.w, r.h); }
-  if (tint) { ctx.fillStyle = tint; ctx.fillRect(r.x, r.y, r.w, r.h); }
-
-  // Fence: rails along the border plus a post at every cell boundary.
-  const inset = Math.max(2, c * 0.07), post = Math.max(4, c * 0.15);
-  ctx.strokeStyle = '#8a5a2b'; ctx.lineWidth = Math.max(2, c * 0.07);
-  ctx.strokeRect(r.x + inset, r.y + inset, r.w - 2 * inset, r.h - 2 * inset);
-  ctx.fillStyle = '#5c3a17';
-  const iw = r.w - 2 * inset, ih = r.h - 2 * inset;
-  for (let i = 0; i <= p.w; i++) {
-    const x = r.x + inset + iw * i / p.w - post / 2;
-    ctx.fillRect(x, r.y + inset - post / 2, post, post);
-    ctx.fillRect(x, r.y + r.h - inset - post / 2, post, post);
+function drawPenGround(p, tint) {
+  rectPath(p);
+  ctx.fillStyle = 'rgba(228,204,140,.7)'; ctx.fill();             // trodden ground
+  if (p.crowded || p.scared) { ctx.fillStyle = 'rgba(220,40,30,.18)'; ctx.fill(); }
+  if (tint) { ctx.fillStyle = tint; ctx.fill(); }
+}
+/** One fence side from field point (x0, y0) to (x1, y1), with a post at each of the n cell boundaries. */
+function drawFence(x0, y0, x1, y1, n) {
+  const c = View.field.cell, ph = c * 0.46, pw = Math.max(3, c * 0.12);
+  const ax = sx(x0, y0), ay = sy(x0, y0), bx = sx(x1, y1), by = sy(x1, y1);
+  ctx.lineCap = 'butt';
+  for (const h of [0.36, 0.76]) {                                 // two rails
+    ctx.beginPath(); ctx.moveTo(ax, ay - ph * h); ctx.lineTo(bx, by - ph * h);
+    ctx.lineWidth = Math.max(3, c * 0.11); ctx.strokeStyle = '#6b4520'; ctx.stroke();
+    ctx.lineWidth = Math.max(1.5, c * 0.06); ctx.strokeStyle = '#c4915a'; ctx.stroke();
   }
-  for (let j = 1; j < p.h; j++) {
-    const y = r.y + inset + ih * j / p.h - post / 2;
-    ctx.fillRect(r.x + inset - post / 2, y, post, post);
-    ctx.fillRect(r.x + r.w - inset - post / 2, y, post, post);
+  for (let i = 0; i <= n; i++) {                                  // posts
+    const x = ax + (bx - ax) * i / n, y = ay + (by - ay) * i / n;
+    ctx.fillStyle = '#6b4520'; ctx.fillRect(x - pw / 2 - 1, y - ph - 1, pw + 2, ph + 2);
+    ctx.fillStyle = '#a06c38'; ctx.fillRect(x - pw / 2, y - ph, pw, ph);
+    ctx.fillStyle = '#d2a36a'; ctx.fillRect(x - pw / 2, y - ph, pw, Math.max(1.5, pw * 0.4));
   }
+}
+/** Back-to-front order for pens so nearer fences and animals cover farther ones. */
+function penDrawOrder() {
+  const pens = G.pens, n = pens.length, out = [], used = new Array(n).fill(false);
+  const behind = (a, b) => (a.x + a.w <= b.x && !(b.y + b.h <= a.y)) || (a.y + a.h <= b.y && !(b.x + b.w <= a.x));
+  for (let k = 0; k < n; k++) {
+    let pick = -1;
+    for (let i = 0; i < n && pick < 0; i++) {
+      if (used[i]) continue;
+      let free = true;
+      for (let j = 0; j < n && free; j++) if (j !== i && !used[j] && behind(pens[j], pens[i])) free = false;
+      if (free) pick = i;
+    }
+    if (pick < 0) pick = used.indexOf(false);
+    used[pick] = true; out.push(pens[pick]);
+  }
+  return out;
 }
 
 function drawPreview(r, valid, cost) {
-  const q = penPx(r);
-  ctx.fillStyle = valid ? 'rgba(70,220,90,.4)' : 'rgba(235,50,40,.4)';
-  ctx.fillRect(q.x, q.y, q.w, q.h);
-  ctx.strokeStyle = valid ? '#2ecc40' : '#ff3b2f'; ctx.lineWidth = 3;
-  ctx.strokeRect(q.x + 1.5, q.y + 1.5, q.w - 3, q.h - 3);
+  rectPath(r);
+  ctx.fillStyle = valid ? 'rgba(70,220,90,.42)' : 'rgba(235,50,40,.42)'; ctx.fill();
+  ctx.strokeStyle = valid ? '#2ecc40' : '#ff3b2f'; ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.stroke();
   if (cost !== null) {
-    const ly = clamp(q.y + q.h / 2, 14, View.h - 14), lx = clamp(q.x + q.w / 2, 30, View.w - 30);
-    label(t('cost_label', { n: cost }), lx, ly, valid ? '#fff' : '#ffb3ad');
+    const m = rectCentre(r);
+    label(t('cost_label', { n: cost }), clamp(m.x, 30, View.w - 30), clamp(m.y, 14, View.h - 14), valid ? '#fff' : '#ffb3ad');
   }
 }
+
+const drawList = [];   // reused every frame for depth sorting
 
 function render() {
   const F = View.field, c = F.cell, d = UI.drag;
   ctx.setTransform(View.dpr, 0, 0, View.dpr, 0, 0);
-  ctx.fillStyle = '#2c5a2c';
+  ctx.fillStyle = '#4c8f3c';
   ctx.fillRect(0, 0, View.w, View.h);
   if (!View.grass) return;
-  // Re-rasterize the emoji sprites once the zoom level has settled on a different size.
-  if (!Input.pinch && Math.abs(c / (View.spriteCell || 1) - 1) > 0.25) { View.sprites.clear(); View.spriteCell = c; }
+  // Re-rasterize sprites once the zoom level has settled on a different size.
+  if (!Input.pinch && Math.abs(c / (View.spriteCell || 1) - 1) > 0.25) { View.sprites.clear(); View.frames.clear(); View.spriteCell = c; }
+
+  // Trees around the field
+  for (const tr of View.trees) {
+    const s = c * 2.3 * tr.size, x = sx(tr.fx, tr.fy), y = sy(tr.fx, tr.fy);
+    if (x < -s || x > View.w + s || y < -s || y > View.h + s * 1.2) continue;
+    ctx.fillStyle = 'rgba(0,0,0,.16)';
+    ctx.beginPath(); ctx.ellipse(x, y, s * 0.26, s * 0.09, 0, 0, TAU); ctx.fill();
+    ctx.drawImage(sprite(tr.kind, (g, size) => { g.scale(size, size); drawTree(g, tr.kind); }), x - s / 2, y - s * 0.96, s, s);
+  }
 
   // Field
-  ctx.fillStyle = '#1f451f';
-  ctx.fillRect(F.x - 4, F.y - 4, G.cols * c + 8, G.rows * c + 8);
-  ctx.drawImage(View.grass, F.x, F.y, G.cols * c, G.rows * c);
+  const n = (G.cols + G.rows) / 2, k = F.tw / View.base.tw;
+  ctx.drawImage(View.grass, F.ox - G.rows * F.tw / 2, F.oy, n * F.tw, n * F.th + View.grassRim * k);
 
-  // Pens (with green/red drop highlights while an animal from stock is dragged)
-  const placing = !!d && (d.kind === 'animal' || (d.kind === 'stock' && d.has && d.moved));
+  // Pen floors (with green/red drop highlights while an animal is carried)
+  const placing = !!d && (d.kind === 'animal' || (d.kind === 'stock' && d.has && d.phase === 'carry'));
   let hover = null;
   if (placing) { const f = toField(d.px, d.py - Input.lift); hover = penAtCell(f.cx, f.cy); }
   for (const p of G.pens) {
@@ -1246,30 +1530,37 @@ function render() {
       const ok = penAccepts(p, d.species), strong = p === hover ? '.5)' : '.25)';
       tint = (ok ? 'rgba(60,220,80,' : 'rgba(235,50,40,') + strong;
     }
-    drawPen(p, tint);
+    drawPenGround(p, tint);
   }
 
-  // Animals
-  const base = Math.max(c * 0.95, 20);
-  for (const p of G.pens) for (const a of p.animals) {
-    if (a.held) continue;
-    const x = F.x + a.x * c, y = F.y + a.y * c, s = base * animalScale(a);
-    ctx.fillStyle = 'rgba(0,0,0,.18)';
-    ctx.beginPath(); ctx.ellipse(x, y + s * 0.3, s * 0.26, s * 0.09, 0, 0, 6.2832); ctx.fill();
-    drawEmoji(CONFIG.animals[a.species].emoji, x, y, s);
+  // Pens back to front: far fences, animals, near fences
+  for (const p of penDrawOrder()) {
+    drawFence(p.x, p.y, p.x + p.w, p.y, p.w);
+    drawFence(p.x, p.y, p.x, p.y + p.h, p.h);
+    drawList.length = 0;
+    for (const a of p.animals) if (!a.held) drawList.push(a);
+    drawList.sort((a, b) => (a.x + a.y) - (b.x + b.y));
+    for (const a of drawList) {
+      const x = sx(a.x, a.y), y = sy(a.x, a.y), box = animalBox(a.species) * animalScale(a);
+      ctx.fillStyle = 'rgba(0,0,0,.2)';
+      ctx.beginPath(); ctx.ellipse(x, y, box * 0.24, box * 0.08, 0, 0, TAU); ctx.fill();
+      drawAnimal(a.species, x, y, box, a.face, a.moving, a.id);
+    }
+    drawFence(p.x, p.y + p.h, p.x + p.w, p.y + p.h, p.w);
+    drawFence(p.x + p.w, p.y, p.x + p.w, p.y + p.h, p.h);
   }
 
   // Hearts over courting pairs
   for (const p of G.pens) if (p.court) {
-    const x = F.x + (p.court.a.x + p.court.b.x) / 2 * c, y = F.y + (p.court.a.y + p.court.b.y) / 2 * c;
+    const mx = (p.court.a.x + p.court.b.x) / 2, my = (p.court.a.y + p.court.b.y) / 2;
     const pulse = 1 + 0.12 * Math.sin(G.time * 7);
-    drawEmoji(ICON.heart, x, y - c * 0.62, Math.max(c * 0.6, 20) * pulse);
+    drawEmoji(ICON.heart, sx(mx, my), sy(mx, my) - animalBox(p.court.a.species) * 0.85, Math.max(c * 0.75, 20) * pulse);
   }
 
   // Floating sad icons
   for (const s of G.particles) {
     ctx.globalAlpha = clamp(s.life / 0.5, 0, 1);
-    drawEmoji(ICON[s.kind], F.x + s.x * c, F.y + s.y * c, Math.max(c * 0.6, 20));
+    drawEmoji(ICON[s.kind], sx(s.x, s.y), sy(s.x, s.y) - (0.9 + s.z) * c, Math.max(c * 0.75, 20));
   }
   ctx.globalAlpha = 1;
 
@@ -1284,37 +1575,38 @@ function render() {
   // Pen editing: selection, resize feedback, corner handles
   const resizing = d && d.kind === 'corner';
   if (UI.mode === 'edit' && UI.selectedPen) {
-    const q = penPx(UI.selectedPen);
-    ctx.strokeStyle = '#ffd34d'; ctx.lineWidth = 4; ctx.strokeRect(q.x + 2, q.y + 2, q.w - 4, q.h - 4);
+    rectPath(UI.selectedPen);
+    ctx.strokeStyle = '#ffd34d'; ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.stroke();
   }
   if (resizing) {
-    const q = penPx(d.rect);
     if (!d.valid) {
       ctx.save(); ctx.shadowColor = '#ff2a1a'; ctx.shadowBlur = 14;
-      ctx.fillStyle = 'rgba(235,50,40,.35)'; ctx.fillRect(q.x, q.y, q.w, q.h);
-      ctx.strokeStyle = '#ff3b2f'; ctx.lineWidth = 3; ctx.strokeRect(q.x + 1.5, q.y + 1.5, q.w - 3, q.h - 3);
+      rectPath(d.rect);
+      ctx.fillStyle = 'rgba(235,50,40,.35)'; ctx.fill();
+      ctx.strokeStyle = '#ff3b2f'; ctx.lineWidth = 3; ctx.stroke();
       ctx.restore();
     }
-    const lx = clamp(q.x + q.w / 2, 30, View.w - 30), ly = clamp(q.y + q.h / 2, 14, View.h - 14);
+    const m = rectCentre(d.rect), lx = clamp(m.x, 30, View.w - 30), ly = clamp(m.y, 14, View.h - 14);
     if (d.cost > 0) label(t('cost_label', { n: d.cost }), lx, ly, d.valid ? '#fff' : '#ffb3ad');
     else if (d.refund > 0 && d.valid) label(t('refund_label', { n: d.refund }), lx, ly, '#c9ffb0');
   }
   if (UI.mode === 'edit' || resizing) {
-    const hr = Math.max(7, Math.min(11, c * 0.24));
+    const hr = Math.max(7, Math.min(11, c * 0.26));
     for (const p of G.pens) {
       if (UI.mode !== 'edit' && p !== d.pen) continue;   // outside edit mode only the pen being resized shows handles
       for (const h of handlePoints(p)) {
-        ctx.beginPath(); ctx.arc(h.x, h.y, hr, 0, 6.2832);
+        ctx.beginPath(); ctx.arc(h.x, h.y, hr, 0, TAU);
         ctx.fillStyle = '#fff'; ctx.fill();
         ctx.strokeStyle = '#7a4a1b'; ctx.lineWidth = 3; ctx.stroke();
       }
     }
   }
 
-  // Dragged animal, lifted above the finger so it stays visible
-  if (d && (d.kind === 'animal' || (d.kind === 'stock' && d.has))) {
-    const scale = d.kind === 'animal' ? animalScale(d.animal) : (d.adult ? 1 : animalScale({ adult: false, age: d.age }));
-    drawEmoji(CONFIG.animals[d.species].emoji, d.px, d.py - Input.lift, Math.max(base, 44) * 1.2 * scale);
+  // Carried animal: its feet are lifted above the finger so it stays visible
+  if (d && (d.kind === 'animal' || (d.kind === 'stock' && d.has && d.phase !== 'scroll'))) {
+    const scale = d.kind === 'animal' ? animalScale(d.animal) : animalScale({ adult: d.adult, age: d.age });
+    const box = Math.max(animalBox(d.species), 56) * 1.15 * scale;
+    drawAnimal(d.species, d.px, d.py - Input.lift, box, 1, false, 0);
   }
 }
 
@@ -1329,6 +1621,29 @@ function el(tag, cls, text) {
 }
 const animalName = sp => t('name_' + sp);
 const fmtMoney = v => String(Math.floor(v + 1e-6));
+
+/** A small canvas showing one animal (artist image if there is one, otherwise the placeholder). */
+function animalIcon(sp, px) {
+  const k = Math.min(window.devicePixelRatio || 1, 3), S = Math.round(px * k);
+  const cv = makeCanvas(S, S), g = cv.getContext('2d');
+  cv.style.width = cv.style.height = px + 'px';
+  const art = Art.get(sp, 'idle') || Art.get(sp, 'walk');
+  if (art) {
+    const im = art[0], f = Math.min(S / im.width, S / im.height), w = im.width * f, h = im.height * f;
+    g.drawImage(im, (S - w) / 2, (S - h) / 2, w, h);
+  } else {
+    // the placeholders leave empty space above small animals: zoom in on the lower part of the box
+    const zoom = sp === 'elephant' || sp === 'deer' ? 1 : 1.25;
+    g.translate(S / 2, S); g.scale(S * zoom, S * zoom); g.translate(-0.5, -0.97);
+    drawCritter(g, sp, 0, false);
+  }
+  return cv;
+}
+function buildMenuArt() {
+  const row = $('menuAnimals');
+  row.textContent = '';
+  for (const sp of CONFIG.animalOrder) row.appendChild(animalIcon(sp, 52));
+}
 
 function applyStaticStrings() {
   document.documentElement.lang = Save.data.lang;
@@ -1359,6 +1674,7 @@ function openDialog(spec) {
   const d = $('dialog');
   d.textContent = '';
   if (spec.big) d.appendChild(el('div', 'big', spec.big));
+  if (spec.animal) { const b = el('div', 'big'); b.appendChild(animalIcon(spec.animal, 72)); d.appendChild(b); }
   if (spec.title) d.appendChild(el('h2', '', spec.title));
   for (const line of spec.lines || []) d.appendChild(el('p', '', line));
   if (spec.content) d.appendChild(spec.content);
@@ -1394,7 +1710,7 @@ function openPenConfirm(r, cost) {
     buttons: [
       { label: t('confirm'), primary: true, silent: true, action: () => {
           UI.pendingPen = null;
-          if (createPen(r)) { Sound.play('buy'); setMode(null); }
+          if (createPen(r)) { Sound.play('buy'); if (UI.mode === 'pen') setMode(null); }
         } },
       { label: t('cancel'), action: () => { UI.pendingPen = null; } }
     ]
@@ -1427,7 +1743,7 @@ function openPurchase(sp) {
     show();
   }
   openDialog({
-    big: A.emoji, title: t('buy_title', { animal: animalName(sp) }), content: box,
+    animal: sp, title: t('buy_title', { animal: animalName(sp) }), content: box,
     buttons: [
       { label: t('accept'), primary: true, disabled: max < 1, silent: true, action: () => {
           if (buyAnimals(sp, count)) { Sound.play('buy'); refreshPanel(); }
@@ -1440,7 +1756,7 @@ function openPurchase(sp) {
 function openSellConfirm(sp, adult, doSell) {
   const name = adult ? animalName(sp) : t('baby_of', { animal: animalName(sp) });
   openDialog({
-    big: CONFIG.animals[sp].emoji,
+    animal: sp,
     lines: [t('sell_confirm', { animal: name, price: sellValue(sp, adult) })],
     buttons: [
       { label: t('yes'), primary: true, silent: true, action: () => {
@@ -1513,12 +1829,13 @@ function buildBestiary() {
   for (const sp of CONFIG.animalOrder) {
     const A = CONFIG.animals[sp], known = Save.data.bestiary.includes(sp);
     const card = el('div', 'beast' + (known ? '' : ' locked'));
-    card.append(el('div', 'em', A.emoji), el('div', '', known ? animalName(sp) : t('locked')));
+    const pic = el('div', 'em'); pic.appendChild(animalIcon(sp, 54));
+    card.append(pic, el('div', '', known ? animalName(sp) : t('locked')));
     if (known) onTap(card, () => {
       Sound.play('tap');
       const fears = A.fears.length ? A.fears.map(animalName).join(', ') : t('best_nothing');
       openDialog({
-        big: A.emoji, title: animalName(sp),
+        animal: sp, title: animalName(sp),
         lines: [t('desc_' + sp), t('best_fears', { list: fears }),
                 t('best_price', { n: A.price }) + '  ·  ' + t('best_income', { n: A.rate, s: CONFIG.donationInterval })],
         buttons: [{ label: t('back'), primary: true }]
@@ -1626,27 +1943,25 @@ function buildPanel() {
   panel.textContent = ''; panel.scrollTop = 0;
   for (const sp of G.level.species) {
     const row = el('div', 'row');
-    const icon = el('div', 'icon', CONFIG.animals[sp].emoji);
-    icon.appendChild(el('span', 'badge'));
+    const icon = el('div', 'icon');
+    icon.appendChild(animalIcon(sp, 84));
+    icon.append(el('span', 'badge price', '💰' + CONFIG.animals[sp].price), el('span', 'badge stock'));
     icon.dataset.species = sp;
     icon.addEventListener('pointerdown', e => startStockDrag(sp, e, icon));
-    const plus = el('button', 'btn plus', '+');
-    onTap(plus, () => { if (G && !G.over) { Sound.play('tap'); openPurchase(sp); } });
-    row.append(icon, plus);
+    row.appendChild(icon);
     panel.appendChild(row);
   }
   refreshPanel();
 }
-/** Update the badges in place (never rebuild the icons: one may be mid-drag). */
+/** Update the stock badges in place (never rebuild the icons: one may be mid-drag). */
 function refreshPanel() {
   if (!G) return;
   document.querySelectorAll('#panel .icon').forEach(icon => {
-    const sp = icon.dataset.species, n = stockCount(sp), badge = icon.querySelector('.badge');
-    badge.textContent = n > 0 ? String(n) : '💰' + CONFIG.animals[sp].price;
-    badge.classList.toggle('price', n === 0);
+    const n = stockCount(icon.dataset.species), badge = icon.querySelector('.badge.stock');
+    badge.textContent = String(n);
+    badge.classList.toggle('hidden', n === 0);
   });
 }
-
 $('panel').addEventListener('wheel', e => { $('panel').scrollTop += e.deltaY; }, { passive: true });
 
 /* ----- HUD numbers (DOM is only touched when a value changes) ----- */
@@ -1670,7 +1985,7 @@ function updateHud() {
   const g = G.level.goal, pr = goalProgress();
   setText('goal', 'goal', g.type === 'money'
     ? t('goal_money', { cur: fmtMoney(pr.cur), goal: g.amount })
-    : CONFIG.animals[g.species].emoji + ' ' + t('goal_animals', { animals: t('names_' + g.species), cur: pr.cur, goal: g.amount }));
+    : t('goal_animals', { animals: t('names_' + g.species), cur: pr.cur, goal: g.amount }));
 
   const noPens = G.pens.length === 0;
   if (L.noPens !== noPens) {
@@ -1680,7 +1995,7 @@ function updateHud() {
   }
 
   // Sell icon: only while an animal is being dragged
-  const carrying = !!d && (d.kind === 'animal' || (d.kind === 'stock' && d.has));
+  const carrying = !!d && (d.kind === 'animal' || (d.kind === 'stock' && d.has && d.phase !== 'scroll'));
   if (L.carrying !== carrying) { L.carrying = carrying; $('sell').classList.toggle('hidden', !carrying); }
   const target = carrying ? dropTarget(d.px, d.py) : null;
   if (L.target !== target) {
@@ -1692,15 +2007,49 @@ function updateHud() {
   // Trash icon: over the selected pen, only if it is empty
   const sel = UI.mode === 'edit' ? UI.selectedPen : null;
   const showTrash = !!sel && sel.animals.length === 0;
-  const pos = showTrash ? penPx(sel) : null;
-  const key = showTrash ? (pos.x + pos.w / 2) + ',' + (pos.y + pos.h / 2) : '';
+  const pos = showTrash ? rectCentre(sel) : null;
+  const key = showTrash ? pos.x + ',' + pos.y : '';
   if (L.trash !== key) {
     L.trash = key;
     const tr = $('trash');
     tr.classList.toggle('hidden', !showTrash);
-    if (showTrash) { tr.style.left = (pos.x + pos.w / 2) + 'px'; tr.style.top = (pos.y + pos.h / 2) + 'px'; }
+    if (showTrash) { tr.style.left = pos.x + 'px'; tr.style.top = pos.y + 'px'; }
   }
 }
+
+/* =====================================================================
+   8b. ARTIST IMAGES — optional files listed in CONFIG.art replace the placeholders
+   ===================================================================== */
+const Art = {
+  loaded: {},     // species -> { idle: [Image...], walk: [Image...] }
+  timer: 0,
+
+  load() {
+    for (const sp of CONFIG.animalOrder) {
+      const def = (CONFIG.art.animals || {})[sp] || {};
+      this.loaded[sp] = { idle: [], walk: [] };
+      for (const kind of ['idle', 'walk']) (def[kind] || []).forEach((src, i) => {
+        const im = new Image();
+        im.onload = () => { this.loaded[sp][kind][i] = im; clearTimeout(this.timer); this.timer = setTimeout(() => this.refresh(), 60); };
+        im.onerror = () => { /* missing file: the placeholder stays */ };
+        im.src = src;
+      });
+    }
+  },
+  /** The loaded frames of a species, or null until every listed file has arrived. */
+  get(sp, kind) {
+    const want = (((CONFIG.art.animals || {})[sp] || {})[kind] || []).length;
+    const have = this.loaded[sp] ? this.loaded[sp][kind] : [];
+    return want > 0 && have.filter(Boolean).length === want ? have : null;
+  },
+  /** New images arrived: redraw everything that shows animals. */
+  refresh() {
+    View.frames.clear();
+    buildMenuArt();
+    if (UI.screen === 'bestiary') buildBestiary();
+    if (G && !UI.drag) buildPanel();
+  }
+};
 
 /* =====================================================================
    9. AUDIO — tiny synthesized sounds, started on the first tap
@@ -1785,6 +2134,8 @@ document.addEventListener('visibilitychange', () => {
 });
 
 Save.load();
+Art.load();
+buildMenuArt();
 applyStaticStrings();
 showScreen('menu');
 resize();
