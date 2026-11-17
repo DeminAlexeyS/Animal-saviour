@@ -234,6 +234,7 @@ const CONFIG = {
   // Economy
   donationInterval: 5,        // seconds between donation ticks
   penCostPerCell: 5,
+  penShrinkRefund: 0.5,       // share of the price difference paid back when a pen shrinks
   sellFactorAdult: 0.6,
   sellFactorBaby: 0.3,
   babyIncomeFactor: 0.5,
@@ -259,9 +260,9 @@ const CONFIG = {
   babyScale: 0.5,
 
   // Animal movement (in cells)
-  wanderSpeed: 0.45,
-  wanderPauseMin: 0.6,
-  wanderPauseMax: 3.5,
+  wanderSpeed: 0.55,
+  restMin: 2, restMax: 5,     // seconds an animal stands still
+  walkMin: 3, walkMax: 7,     // seconds an animal keeps walking around
   penMargin: 0.3,             // animals keep this far from the fence
 
   // Feedback icons
@@ -274,6 +275,12 @@ const CONFIG = {
   pickRadius: 26,             // how close a press must be to grab an animal
   handleRadius: 26,           // how close a press must be to grab a pen corner
   tapSlop: 10,                // movement below this still counts as a tap
+  cornerRadiusMin: 14,        // grab zone around a pen corner in normal play
+  cornerRadiusMax: 26,
+
+  // Camera
+  maxZoom: 3,
+  wheelZoomStep: 1.15,
 
   defaultVolume: 0.6,
 
@@ -322,11 +329,13 @@ const STRINGS = {
     goal_money_desc: 'Goal: reach {goal} money.',
     goal_animals_desc: 'Goal: have {goal} adult {animals} in pens.',
     intro_hint: 'Keep well-being above 0.',
+    intro_tip: 'Drag on empty grass to build a pen, drag a pen corner to resize it, pinch with two fingers to zoom.',
 
     pen_title: 'Build this pen?',
     pen_text: '{w} × {h} cells for {cost} money.',
     confirm: 'Confirm', cancel: 'Cancel',
     cost_label: '💰 {n}',
+    refund_label: '+💰 {n}',
 
     buy_title: 'Buy {animal}',
     buy_each: '{price} money each',
@@ -494,10 +503,12 @@ function createPen(r) {
   G.pens.push(pen);
   return pen;
 }
-/** Resizing: growing charges for the added cells, shrinking refunds nothing. */
+/** Resizing: growing charges for the added cells, shrinking pays back part of the price difference. */
 function checkResize(pen, orig, r) {
-  const cost = penCost(Math.max(0, r.w * r.h - orig.w * orig.h));
-  return { cost, valid: rectInField(r) && !overlapsAnyPen(r, pen) && cost <= G.money };
+  const diff = r.w * r.h - orig.w * orig.h;
+  const cost = diff > 0 ? penCost(diff) : 0;
+  const refund = diff < 0 ? penCost(-diff) * CONFIG.penShrinkRefund : 0;
+  return { cost, refund, valid: rectInField(r) && !overlapsAnyPen(r, pen) && cost <= G.money };
 }
 function deletePen(pen) {
   if (pen.animals.length) return false;
@@ -508,7 +519,7 @@ function deletePen(pen) {
 /* ----- animals and stock ----- */
 function makeAnimal(species, adult, age, x, y) {
   return { id: G.nextId++, species, adult, age, x, y, tx: x, ty: y,
-           wait: rand(0, CONFIG.wanderPauseMax), held: false };
+           walking: false, timer: rand(0.3, CONFIG.restMin), held: false };
 }
 function stockCount(sp) { const s = G.stock[sp]; return s ? s.adults + s.babies.length : 0; }
 /** What the next animal taken from stock would be (adults first, then babies). */
@@ -546,6 +557,15 @@ function removeFromPen(pen, a) {
   if (i < 0) return false;
   pen.animals.splice(i, 1);
   if (pen.court && (pen.court.a === a || pen.court.b === a)) cancelCourtship(pen);
+  return true;
+}
+/** Move an animal straight into another pen (empty or same species). */
+function moveAnimal(from, to, a, fx, fy) {
+  if (from === to || !penAccepts(to, a.species)) return false;
+  if (!removeFromPen(from, a)) return false;
+  a.x = a.tx = fx; a.y = a.ty = fy;
+  clampToPen(to, a);
+  to.animals.push(a);
   return true;
 }
 function returnToStock(pen, a) {
@@ -661,16 +681,20 @@ function updatePen(p, dt) {
       const side = a === c.a ? -0.22 : 0.22;
       tx = (a.x + other.x) / 2 + side; ty = (a.y + other.y) / 2;
       speed *= 2; courting = true;
-    } else if (a.wait > 0) {
-      a.wait -= dt; tx = a.x; ty = a.y;
-    } else { tx = a.tx; ty = a.ty; }
+    } else {
+      // Alternate between standing still and walking around for a few seconds each.
+      a.timer -= dt;
+      if (a.timer <= 0) {
+        a.walking = !a.walking;
+        a.timer = a.walking ? rand(C.walkMin, C.walkMax) : rand(C.restMin, C.restMax);
+        if (a.walking) { a.tx = rand(p.x, p.x + p.w); a.ty = rand(p.y, p.y + p.h); }
+      }
+      if (a.walking) { tx = a.tx; ty = a.ty; } else { tx = a.x; ty = a.y; }
+    }
     const dx = tx - a.x, dy = ty - a.y, dist = Math.hypot(dx, dy), step = speed * dt;
     if (dist <= step) {
       a.x = tx; a.y = ty;
-      if (!courting && a.wait <= 0) {
-        a.wait = rand(C.wanderPauseMin, C.wanderPauseMax);
-        a.tx = rand(p.x, p.x + p.w); a.ty = rand(p.y, p.y + p.h);
-      }
+      if (!courting && a.walking) { a.tx = rand(p.x, p.x + p.w); a.ty = rand(p.y, p.y + p.h); }   // next waypoint
     } else { a.x += dx / dist * step; a.y += dy / dist * step; }
     clampToPen(p, a);   // also keeps animals inside after a resize
   }
@@ -737,25 +761,72 @@ const $ = id => document.getElementById(id);
 const canvas = $('game');
 const ctx = canvas.getContext('2d');
 
-const Input = { pid: null, lift: 0 };
+const Input = { pid: null, type: '', lift: 0, x: 0, y: 0,     // first finger (or mouse)
+                pid2: null, x2: 0, y2: 0, pinch: null };          // second finger: zoom and pan
 let tapCandidate = null;   // element that received the current pointerdown (see onTap)
 
-function releasePointer() { Input.pid = null; tapCandidate = null; }
+function releasePointer() { endPinch(); Input.pid = null; tapCandidate = null; }
+function canMoveCamera() { return UI.screen === 'game' && !UI.dialog && !UI.rotate && !!G && !G.over; }
 
-// Capture phase: accept one pointer, swallow every other one.
+/* ----- two-finger zoom and pan ----- */
+function startPinch() {
+  cancelDrag(); tapCandidate = null;          // a second finger cancels whatever the first was doing
+  const F = View.field, cx = (Input.x + Input.x2) / 2, cy = (Input.y + Input.y2) / 2;
+  Input.pinch = { dist: Math.max(10, Math.hypot(Input.x - Input.x2, Input.y - Input.y2)), zoom: View.zoom,
+                  fx: (cx - F.x) / F.cell, fy: (cy - F.y) / F.cell };   // field point under the fingers
+}
+function updatePinch() {
+  const p = Input.pinch;
+  if (!p || !G) return;
+  const cx = (Input.x + Input.x2) / 2, cy = (Input.y + Input.y2) / 2;
+  const dist = Math.hypot(Input.x - Input.x2, Input.y - Input.y2);
+  setCamera(p.zoom * dist / p.dist, cx, cy, p.fx, p.fy);   // the grabbed field point follows the fingers
+}
+function endPinch() { Input.pinch = null; Input.pid2 = null; }
+
+// Capture phase: the first pointer plays, a second touch zooms/pans, everything else is swallowed.
 window.addEventListener('pointerdown', e => {
   Sound.unlock();
-  if (e.pointerType === 'mouse' && e.button !== 0) { e.stopImmediatePropagation(); return; }
-  if (Input.pid !== null && e.pointerId !== Input.pid) {
-    if (!e.isPrimary) { e.stopImmediatePropagation(); e.preventDefault(); return; }
-    cancelDrag();          // the old pointer vanished without an "up"; start over
+  if (e.pointerType === 'mouse' && e.button !== 0) {
+    e.stopImmediatePropagation();
+    if (Input.pid === null && e.target === canvas && canMoveCamera()) {   // right/middle mouse drag pans
+      Input.pid = e.pointerId; Input.type = 'mouse';
+      UI.drag = { kind: 'pan', px: e.clientX, py: e.clientY };
+      try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* not critical */ }
+    }
+    return;
   }
-  Input.pid = e.pointerId;
+  if (Input.pid !== null && e.pointerId !== Input.pid) {
+    if (!e.isPrimary) {
+      e.stopImmediatePropagation(); e.preventDefault();
+      if (Input.pid2 === null && e.pointerType === 'touch' && Input.type === 'touch' && canMoveCamera()) {
+        Input.pid2 = e.pointerId; Input.x2 = e.clientX; Input.y2 = e.clientY;
+        startPinch();
+      }
+      return;
+    }
+    cancelDrag(); endPinch();   // the old pointer vanished without an "up"; start over
+  }
+  Input.pid = e.pointerId; Input.type = e.pointerType;
+  Input.x = e.clientX; Input.y = e.clientY;
   Input.lift = e.pointerType === 'mouse' ? 0 : CONFIG.dragLift;
   tapCandidate = null;
 }, true);
-for (const type of ['pointermove', 'pointerup', 'pointercancel']) {
-  window.addEventListener(type, e => { if (e.pointerId !== Input.pid) e.stopImmediatePropagation(); }, true);
+window.addEventListener('pointermove', e => {
+  if (e.pointerId === Input.pid) {
+    Input.x = e.clientX; Input.y = e.clientY;
+    if (Input.pinch) { updatePinch(); e.stopImmediatePropagation(); }
+  } else {
+    if (e.pointerId === Input.pid2) { Input.x2 = e.clientX; Input.y2 = e.clientY; updatePinch(); }
+    e.stopImmediatePropagation();
+  }
+}, true);
+for (const type of ['pointerup', 'pointercancel']) {
+  window.addEventListener(type, e => {
+    if (e.pointerId === Input.pid) return;            // handled in the bubble phase below
+    if (e.pointerId === Input.pid2) endPinch();
+    e.stopImmediatePropagation();
+  }, true);
 }
 // Bubble phase: drive the current drag gesture.
 window.addEventListener('pointermove', e => dragMove(e.clientX, e.clientY));
@@ -769,6 +840,13 @@ for (const type of ['gesturestart', 'gesturechange', 'gestureend', 'contextmenu'
   document.addEventListener(type, e => e.preventDefault());
 }
 window.addEventListener('wheel', e => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+// Mouse wheel (or trackpad pinch) zooms around the cursor.
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  if (!canMoveCamera()) return;
+  const F = View.field, k = e.deltaY < 0 ? CONFIG.wheelZoomStep : 1 / CONFIG.wheelZoomStep;
+  setCamera(View.zoom * k, e.clientX, e.clientY, (e.clientX - F.x) / F.cell, (e.clientY - F.y) / F.cell);
+}, { passive: false });
 
 /** Tap handler built on pointer events so it obeys the one-finger rule. */
 function onTap(el, fn) {
@@ -797,11 +875,15 @@ const cellInField = (cx, cy) => cx >= 0 && cy >= 0 && cx < G.cols && cy < G.rows
 
 /* ----- what is under the finger ----- */
 function findAnimal(px, py) {
-  const F = View.field;
-  let best = null, bestD = Math.max(CONFIG.pickRadius, F.cell * 0.5);
-  for (const p of G.pens) for (const a of p.animals) {
-    const d = Math.hypot(F.x + a.x * F.cell - px, F.y + a.y * F.cell - py);
-    if (d < bestD) { bestD = d; best = { pen: p, animal: a }; }
+  const F = View.field, f = toField(px, py), under = penAtCell(f.cx, f.cy);
+  const inside = Math.max(CONFIG.pickRadius, F.cell * 0.5), outside = F.cell * 0.35;
+  let best = null;
+  for (const p of G.pens) {
+    const limit = p === under ? inside : outside;   // be strict when the finger is not in the animal's pen
+    for (const a of p.animals) {
+      const d = Math.hypot(F.x + a.x * F.cell - px, F.y + a.y * F.cell - py);
+      if (d < limit && (!best || d < best.dist)) best = { pen: p, animal: a, dist: d };
+    }
   }
   return best;
 }
@@ -827,36 +909,57 @@ function findHandle(px, py) {
   return best;
 }
 
+/** Normal play: a press inside a pen, close to one of its corners, grabs that corner. */
+function findCorner(px, py) {
+  const F = View.field, f = toField(px, py), p = penAtCell(f.cx, f.cy);
+  if (!p) return null;
+  const r = Math.min(clamp(F.cell * 0.4, CONFIG.cornerRadiusMin, CONFIG.cornerRadiusMax), F.cell * 0.45);
+  const xs = [F.x + p.x * F.cell, F.x + (p.x + p.w) * F.cell], ys = [F.y + p.y * F.cell, F.y + (p.y + p.h) * F.cell];
+  const hs = handlePoints(p);
+  let best = null;
+  for (let i = 0; i < 4; i++) {
+    const d = Math.hypot(xs[i % 2] - px, ys[i >> 1] - py);
+    if (d < r && (!best || d < best.dist)) best = { pen: p, fx: hs[i].fx, fy: hs[i].fy, dist: d };
+  }
+  return best;
+}
+
 /* ----- starting a gesture ----- */
 canvas.addEventListener('pointerdown', e => {
-  if (UI.screen !== 'game' || UI.dialog || UI.rotate || !G || G.over) return;
+  if (!canMoveCamera()) return;
   try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* not critical */ }
   const px = e.clientX, py = e.clientY, f = toField(px, py);
+  const inField = cellInField(f.cx, f.cy), emptyCell = inField && !penAtCell(f.cx, f.cy);
 
-  if (UI.mode === 'pen') {
-    if (cellInField(f.cx, f.cy)) UI.drag = { kind: 'newpen', sx: f.cx, sy: f.cy, cx: f.cx, cy: f.cy };
-    return;
-  }
+  // armed = the preview shows at once (New pen button); otherwise only after the finger slides
+  const startPen = armed => {
+    UI.drag = { kind: 'newpen', sx: f.cx, sy: f.cy, cx: f.cx, cy: f.cy, px0: px, py0: py, armed };
+  };
+  const startCorner = h => {
+    const p = h.pen;
+    UI.selectedPen = null;
+    UI.drag = { kind: 'corner', pen: p, fx: h.fx, fy: h.fy, orig: { x: p.x, y: p.y, w: p.w, h: p.h },
+                rect: { x: p.x, y: p.y, w: p.w, h: p.h }, valid: true, cost: 0, refund: 0 };
+  };
+
+  if (UI.mode === 'pen') { if (inField) startPen(true); return; }
   if (UI.mode === 'edit') {
     const h = findHandle(px, py);
-    if (h) {
-      const p = h.pen;
-      UI.selectedPen = null;
-      UI.drag = { kind: 'corner', pen: p, fx: h.fx, fy: h.fy, orig: { x: p.x, y: p.y, w: p.w, h: p.h },
-                  rect: { x: p.x, y: p.y, w: p.w, h: p.h }, valid: true, cost: 0 };
-    } else {
-      UI.drag = { kind: 'tap', sx: px, sy: py, pen: penAtCell(f.cx, f.cy) };
-    }
+    if (h) startCorner(h);
+    else if (emptyCell) startPen(false);
+    else UI.drag = { kind: 'tap', sx: px, sy: py, pen: penAtCell(f.cx, f.cy) };
     return;
   }
-  // Normal play: grab an animal out of its pen.
-  const hit = findAnimal(px, py);
-  if (hit) {
+
+  // Normal play: grab an animal, grab a pen corner, or start a new pen on empty grass.
+  const hit = findAnimal(px, py), corner = findCorner(px, py);
+  if (hit && (!corner || hit.dist <= corner.dist)) {
     hit.animal.held = true;
     if (hit.pen.court && (hit.pen.court.a === hit.animal || hit.pen.court.b === hit.animal)) cancelCourtship(hit.pen);
     UI.drag = { kind: 'animal', pen: hit.pen, animal: hit.animal, species: hit.animal.species, px, py };
     Sound.play('tap');
-  }
+  } else if (corner) startCorner(corner);
+  else if (emptyCell) startPen(false);
 });
 
 /** Called from the panel: press on a species icon. */
@@ -875,11 +978,16 @@ function dragMove(px, py) {
   if (!d || !G) return;
   if (d.kind === 'newpen') {
     const f = toField(px, py); d.cx = f.cx; d.cy = f.cy;
+    if (!d.armed && Math.hypot(px - d.px0, py - d.py0) > CONFIG.tapSlop) d.armed = true;
+  } else if (d.kind === 'pan') {
+    View.field.x += px - d.px; View.field.y += py - d.py;
+    d.px = px; d.py = py;
+    clampCamera();
   } else if (d.kind === 'corner') {
     const f = toField(px, py);
     d.rect = rectFromCells(d.fx, d.fy, f.cx, f.cy);
     const info = checkResize(d.pen, d.orig, d.rect);
-    d.valid = info.valid; d.cost = info.cost;
+    d.valid = info.valid; d.cost = info.cost; d.refund = info.refund;
     // The pen reshapes live while the shape is valid; otherwise it shows its old shape plus a red ghost.
     Object.assign(d.pen, d.valid ? d.rect : d.orig);
   } else if (d.kind === 'stock') {
@@ -907,6 +1015,7 @@ function dragEnd(px, py) {
   if (!G) return;
 
   if (d.kind === 'newpen') {
+    if (!d.armed) { if (UI.mode === 'edit') UI.selectedPen = null; return; }   // just a tap on grass
     const r = rectFromCells(d.sx, d.sy, d.cx, d.cy);
     const info = checkNewPen(r);
     if (info.valid) { UI.pendingPen = r; openPenConfirm(r, info.cost); }
@@ -915,8 +1024,9 @@ function dragEnd(px, py) {
     const changed = d.valid && (d.rect.x !== d.orig.x || d.rect.y !== d.orig.y || d.rect.w !== d.orig.w || d.rect.h !== d.orig.h);
     if (changed) {
       Object.assign(d.pen, d.rect);
-      G.money -= d.cost;
-      Sound.play(d.cost > 0 ? 'buy' : 'drop');
+      G.money += d.refund - d.cost;
+      Sound.play(d.cost > 0 ? 'buy' : d.refund > 0 ? 'sell' : 'drop');
+      checkWin(); handleEvents();
     } else {
       Object.assign(d.pen, d.orig);   // snap back
     }
@@ -933,7 +1043,11 @@ function dragEnd(px, py) {
     const target = dropTarget(px, py);
     if (target === 'stock') { returnToStock(d.pen, d.animal); Sound.play('drop'); refreshPanel(); }
     else if (target === 'sell') openSellConfirm(d.species, d.animal.adult, () => sellFromPen(d.pen, d.animal));
-    // anywhere else: it simply stays in its pen
+    else {
+      // another pen that is empty or holds the same species: move there; anywhere else: back to its pen
+      const f = toField(px, py - Input.lift), pen = penAtCell(f.cx, f.cy);
+      if (pen && moveAnimal(d.pen, pen, d.animal, f.fx, f.fy)) Sound.play('drop');
+    }
   } else if (d.kind === 'stock') {
     if (!d.has) { if (!d.moved) openPurchase(d.species); return; }
     if (!d.moved) return;
@@ -962,7 +1076,11 @@ function cancelDrag() {
    ===================================================================== */
 const View = {
   w: 0, h: 0, dpr: 1,
-  field: { x: 0, y: 0, cell: 32 },
+  field: { x: 0, y: 0, cell: 32 },     // where the grid is on screen right now (includes zoom and pan)
+  base: { cell: 32 },                  // cell size at zoom 1 (whole field fits)
+  area: { x: 0, y: 0, w: 1, h: 1 },    // screen area between the floating UI
+  zoom: 1,
+  spriteCell: 0,
   grass: null,             // pre-rendered grass tiles
   sprites: new Map()       // emoji -> pre-rendered canvas (much faster than fillText per frame)
 };
@@ -993,15 +1111,15 @@ function layoutField() {
   const bottom = lc.height > 0 ? Math.max(8, View.h - lc.bottom) : 8;
   const availW = View.w - 2 * side, availH = View.h - top - bottom;
   const cell = Math.max(10, Math.floor(Math.min(availW / G.cols, availH / G.rows)));
-  View.field = {
-    cell,
-    x: Math.round((View.w - cell * G.cols) / 2),
-    y: Math.round(top + (availH - cell * G.rows) / 2)
-  };
+  View.base = { cell };
+  View.area = { x: side, y: top, w: availW, h: availH };
+  View.zoom = 1;
+  View.field = { cell, x: 0, y: 0 };
+  clampCamera();
 
-  // Grass tiles, drawn once.
+  // Grass tiles, drawn once (extra resolution so they stay crisp when zoomed in).
   const g = document.createElement('canvas');
-  const s = cell * View.dpr;
+  const s = cell * Math.min(View.dpr * 2, 2048 / (cell * G.cols));
   g.width = Math.ceil(G.cols * s); g.height = Math.ceil(G.rows * s);
   const gx = g.getContext('2d');
   for (let y = 0; y < G.rows; y++) for (let x = 0; x < G.cols; x++) {
@@ -1016,6 +1134,22 @@ function layoutField() {
   }
   View.grass = g;
   View.sprites.clear();
+}
+
+/** Zoom to `zoom` so that field point (fx, fy) sits at screen point (sx, sy). */
+function setCamera(zoom, sx, sy, fx, fy) {
+  View.zoom = clamp(zoom, 1, CONFIG.maxZoom);
+  const F = View.field;
+  F.cell = View.base.cell * View.zoom;
+  F.x = sx - fx * F.cell; F.y = sy - fy * F.cell;
+  clampCamera();
+}
+/** Keep the field centred while it fits, otherwise never show empty space beyond its edges. */
+function clampCamera() {
+  if (!G) return;
+  const F = View.field, A = View.area, W = G.cols * F.cell, H = G.rows * F.cell;
+  F.x = W <= A.w ? A.x + (A.w - W) / 2 : clamp(F.x, A.x + A.w - W, A.x);
+  F.y = H <= A.h ? A.y + (A.h - H) / 2 : clamp(F.y, A.y + A.h - H, A.y);
 }
 
 function sprite(emoji) {
@@ -1094,6 +1228,8 @@ function render() {
   ctx.fillStyle = '#2c5a2c';
   ctx.fillRect(0, 0, View.w, View.h);
   if (!View.grass) return;
+  // Re-rasterize the emoji sprites once the zoom level has settled on a different size.
+  if (!Input.pinch && Math.abs(c / (View.spriteCell || 1) - 1) > 0.25) { View.sprites.clear(); View.spriteCell = c; }
 
   // Field
   ctx.fillStyle = '#1f451f';
@@ -1101,12 +1237,12 @@ function render() {
   ctx.drawImage(View.grass, F.x, F.y, G.cols * c, G.rows * c);
 
   // Pens (with green/red drop highlights while an animal from stock is dragged)
-  const placing = d && d.kind === 'stock' && d.has && d.moved;
+  const placing = !!d && (d.kind === 'animal' || (d.kind === 'stock' && d.has && d.moved));
   let hover = null;
   if (placing) { const f = toField(d.px, d.py - Input.lift); hover = penAtCell(f.cx, f.cy); }
   for (const p of G.pens) {
     let tint = null;
-    if (placing) {
+    if (placing && !(d.kind === 'animal' && p === d.pen)) {
       const ok = penAccepts(p, d.species), strong = p === hover ? '.5)' : '.25)';
       tint = (ok ? 'rgba(60,220,80,' : 'rgba(235,50,40,') + strong;
     }
@@ -1138,37 +1274,40 @@ function render() {
   ctx.globalAlpha = 1;
 
   // New pen preview (while drawing, and while its confirm dialog is open)
-  if (d && d.kind === 'newpen') {
+  if (d && d.kind === 'newpen' && d.armed) {
     const r = rectFromCells(d.sx, d.sy, d.cx, d.cy), info = checkNewPen(r);
     drawPreview(r, info.valid, info.cost);
   } else if (UI.pendingPen) {
     drawPreview(UI.pendingPen, true, penCost(UI.pendingPen.w * UI.pendingPen.h));
   }
 
-  // Edit mode: selection, corner handles, resize feedback
-  if (UI.mode === 'edit') {
-    if (UI.selectedPen) {
-      const q = penPx(UI.selectedPen);
-      ctx.strokeStyle = '#ffd34d'; ctx.lineWidth = 4; ctx.strokeRect(q.x + 2, q.y + 2, q.w - 4, q.h - 4);
+  // Pen editing: selection, resize feedback, corner handles
+  const resizing = d && d.kind === 'corner';
+  if (UI.mode === 'edit' && UI.selectedPen) {
+    const q = penPx(UI.selectedPen);
+    ctx.strokeStyle = '#ffd34d'; ctx.lineWidth = 4; ctx.strokeRect(q.x + 2, q.y + 2, q.w - 4, q.h - 4);
+  }
+  if (resizing) {
+    const q = penPx(d.rect);
+    if (!d.valid) {
+      ctx.save(); ctx.shadowColor = '#ff2a1a'; ctx.shadowBlur = 14;
+      ctx.fillStyle = 'rgba(235,50,40,.35)'; ctx.fillRect(q.x, q.y, q.w, q.h);
+      ctx.strokeStyle = '#ff3b2f'; ctx.lineWidth = 3; ctx.strokeRect(q.x + 1.5, q.y + 1.5, q.w - 3, q.h - 3);
+      ctx.restore();
     }
-    if (d && d.kind === 'corner') {
-      if (!d.valid) {
-        const q = penPx(d.rect);
-        ctx.save(); ctx.shadowColor = '#ff2a1a'; ctx.shadowBlur = 14;
-        ctx.fillStyle = 'rgba(235,50,40,.35)'; ctx.fillRect(q.x, q.y, q.w, q.h);
-        ctx.strokeStyle = '#ff3b2f'; ctx.lineWidth = 3; ctx.strokeRect(q.x + 1.5, q.y + 1.5, q.w - 3, q.h - 3);
-        ctx.restore();
-      }
-      if (d.cost > 0) {
-        const q = penPx(d.rect);
-        label(t('cost_label', { n: d.cost }), clamp(q.x + q.w / 2, 30, View.w - 30), clamp(q.y + q.h / 2, 14, View.h - 14), d.valid ? '#fff' : '#ffb3ad');
-      }
-    }
+    const lx = clamp(q.x + q.w / 2, 30, View.w - 30), ly = clamp(q.y + q.h / 2, 14, View.h - 14);
+    if (d.cost > 0) label(t('cost_label', { n: d.cost }), lx, ly, d.valid ? '#fff' : '#ffb3ad');
+    else if (d.refund > 0 && d.valid) label(t('refund_label', { n: d.refund }), lx, ly, '#c9ffb0');
+  }
+  if (UI.mode === 'edit' || resizing) {
     const hr = Math.max(7, Math.min(11, c * 0.24));
-    for (const p of G.pens) for (const h of handlePoints(p)) {
-      ctx.beginPath(); ctx.arc(h.x, h.y, hr, 0, 6.2832);
-      ctx.fillStyle = '#fff'; ctx.fill();
-      ctx.strokeStyle = '#7a4a1b'; ctx.lineWidth = 3; ctx.stroke();
+    for (const p of G.pens) {
+      if (UI.mode !== 'edit' && p !== d.pen) continue;   // outside edit mode only the pen being resized shows handles
+      for (const h of handlePoints(p)) {
+        ctx.beginPath(); ctx.arc(h.x, h.y, hr, 0, 6.2832);
+        ctx.fillStyle = '#fff'; ctx.fill();
+        ctx.strokeStyle = '#7a4a1b'; ctx.lineWidth = 3; ctx.stroke();
+      }
     }
   }
 
@@ -1405,7 +1544,7 @@ function startLevel(idx) {
   simAccumulator = 0;
   openDialog({
     title: t('level_n', { n: idx + 1 }),
-    lines: [goalDescription(G.level), t('intro_hint')],
+    lines: [goalDescription(G.level), t('intro_hint'), t('intro_tip')],
     buttons: [{ label: t('start'), primary: true }]
   });
 }
