@@ -238,15 +238,17 @@ const CONFIG = {
   // Well-being
   wellBeingStart: 100,
   wellBeingMax: 100,
-  wellBeingFall: 0.9,         // per second with one unhappy pen
-  wellBeingFallExtra: 0.9,    // extra factor per additional unhappy pen
+  wellBeingFall: 0.2,         // per second with one unhappy pen
+  wellBeingFallExtra: 0.5,    // extra factor per additional unhappy pen
   wellBeingRise: 0.1,         // per second when nobody is unhappy
   wbYellowBelow: 60,
   wbRedBelow: 30,
 
   // Breeding and growth
-  breedMin: 40,
-  breedMax: 90,
+  // A pen with 2 adults breeds every `breed` seconds (set per animal below). More adults breed faster:
+  // interval = breed × 2 / adults, so 4 adults halve it and 6 adults cut it to a third.
+  breedJitter: 0.2,           // each interval varies randomly by ±20 %
+  breedMinInterval: 6,        // the interval never drops below this many seconds
   courtshipTime: 4,
   growTime: 60,
   babyCrowdWeight: 0.5,
@@ -255,6 +257,8 @@ const CONFIG = {
   // Animal movement (in cells)
   wanderSpeed: 0.55,
   restMin: 2, restMax: 5,     // seconds an animal stands still
+  actionChance: 0.6,          // chance that a standing animal plays its "action" animation (eating)
+  actionMin: 1.5, actionMax: 3,   // how long the action lasts, in seconds
   walkMin: 3, walkMax: 7,     // seconds an animal keeps walking around
   penMargin: 0.3,             // animals keep this far from the fence
 
@@ -283,23 +287,30 @@ const CONFIG = {
 
   // Animals: price / income per donation tick / species they fear
   animalOrder: ['chicken', 'rabbit', 'deer', 'wolf', 'tiger', 'elephant'],
-  // (size = how big the animal is drawn compared with the others)
+  // size  = how big the animal is drawn compared with the others
+  // breed = seconds between births in a pen with 2 adults (the start interval; see "Breeding" above)
+  // diet  = 'herbivore' animals get the built-in eating animation, 'predator' animals have none yet
   animals: {
-    chicken:  { price: 20,  rate: 1,   fears: ['wolf', 'tiger'], size: 0.72 },
-    rabbit:   { price: 30,  rate: 1.5, fears: ['wolf', 'tiger'], size: 0.8 },
-    deer:     { price: 60,  rate: 3,   fears: ['wolf', 'tiger'], size: 1.05 },
-    wolf:     { price: 100, rate: 5,   fears: ['tiger'],         size: 0.95 },
-    tiger:    { price: 200, rate: 10,  fears: [],                size: 1.05 },
-    elephant: { price: 300, rate: 15,  fears: [],                size: 1.3 }
+    chicken:  { price: 20,  rate: 1,   fears: ['wolf', 'tiger'], size: 0.72, breed: 40, diet: 'herbivore' },
+    rabbit:   { price: 30,  rate: 1.5, fears: ['wolf', 'tiger'], size: 0.8,  breed: 35, diet: 'herbivore' },
+    deer:     { price: 60,  rate: 3,   fears: ['wolf', 'tiger'], size: 1.05, breed: 55, diet: 'herbivore' },
+    wolf:     { price: 100, rate: 5,   fears: ['tiger'],         size: 0.95, breed: 65, diet: 'predator' },
+    tiger:    { price: 200, rate: 10,  fears: [],                size: 1.05, breed: 75, diet: 'predator' },
+    elephant: { price: 300, rate: 15,  fears: [],                size: 1.3,  breed: 90, diet: 'herbivore' }
   },
   animalDrawSize: 1.75,       // frame height of a size-1 adult, in tile edge lengths
 
   // ANIMAL ART — for the artist.
-  // Every animal has an "idle" list and a "walk" list of image files (one file per animation frame,
-  // played in order and looped). While a list is empty the game draws its built-in placeholder.
+  // Every animal has three lists of image files (one file per animation frame, played in order and looped):
+  //   idle   — standing still
+  //   walk   — walking
+  //   action — a short animation played now and then while standing (herbivores: eating grass;
+  //            predators: nothing yet, so wolf and tiger simply stay idle until frames are added here)
+  // While a list is empty the game draws its built-in placeholder.
   // Example:
   //   chicken: { idle: ['art/chicken_idle.png'],
-  //              walk: ['art/chicken_walk1.png', 'art/chicken_walk2.png', 'art/chicken_walk3.png', 'art/chicken_walk4.png'] },
+  //              walk: ['art/chicken_walk1.png', 'art/chicken_walk2.png', 'art/chicken_walk3.png', 'art/chicken_walk4.png'],
+  //              action: ['art/chicken_eat1.png', 'art/chicken_eat2.png'] },
   // Rules: transparent PNG (or WebP); all frames of one animal the same size; the animal stands with its
   // feet at the bottom centre of the image; every image looks in the direction given by "facing" and the
   // game mirrors it for the other direction. Paths are relative to index.html.
@@ -307,13 +318,14 @@ const CONFIG = {
     facing: 'right',          // direction the source images look: 'right' or 'left'
     walkFps: 8,               // walk frames per second
     idleFps: 2,               // idle frames per second
+    actionFps: 3,             // action frames per second
     animals: {
-      chicken:  { idle: [], walk: [] },
-      rabbit:   { idle: [], walk: [] },
-      deer:     { idle: [], walk: [] },
-      wolf:     { idle: [], walk: [] },
-      tiger:    { idle: [], walk: [] },
-      elephant: { idle: [], walk: [] }
+      chicken:  { idle: [], walk: [], action: [] },
+      rabbit:   { idle: [], walk: [], action: [] },
+      deer:     { idle: [], walk: [], action: [] },
+      wolf:     { idle: [], walk: [], action: [] },
+      tiger:    { idle: [], walk: [], action: [] },
+      elephant: { idle: [], walk: [], action: [] }
     },
 
     // SCENERY ART — same idea: list image files, an empty list keeps the built-in drawing.
@@ -559,7 +571,8 @@ function makeAnimal(species, adult, age, x, y) {
   return { id: G.nextId++, species, adult, age, x, y, tx: x, ty: y,
            walking: false, timer: rand(0.3, CONFIG.restMin), held: false,
            face: Math.random() < 0.5 ? 1 : -1,   // 1 = looking right on screen, -1 = left
-           moving: false };                      // true while it actually changes position (walk animation)
+           moving: false,                        // true while it actually changes position (walk animation)
+           acting: false, restT: 0, actStart: 0, actEnd: 0 };   // "action" animation while standing (eating)
 }
 function stockCount(sp) { const s = G.stock[sp]; return s ? s.adults + s.babies.length : 0; }
 /** What the next animal taken from stock would be (adults first, then babies). */
@@ -590,6 +603,10 @@ function placeFromStock(sp, pen, fx, fy) {
   clampToPen(pen, a);
   pen.animals.push(a);
   return true;
+}
+/** Seconds between births for a pen: the species' start interval, shorter with every extra adult. */
+function breedInterval(species, adults) {
+  return Math.max(CONFIG.breedMinInterval, CONFIG.animals[species].breed * 2 / Math.max(2, adults));
 }
 function cancelCourtship(pen) { pen.court = null; pen.breedT = null; }
 function removeFromPen(pen, a) {
@@ -698,8 +715,10 @@ function updatePen(p, dt) {
       G.events.push({ type: 'birth' });
     }
   } else {
-    if (p.breedT === null) p.breedT = rand(C.breedMin, C.breedMax);
-    p.breedT -= dt;
+    // breedT counts down from about 1 to 0; its speed follows the current number of adults,
+    // so adding or removing adults speeds the running timer up or slows it down straight away
+    if (p.breedT === null) p.breedT = rand(1 - C.breedJitter, 1 + C.breedJitter);
+    p.breedT -= dt / breedInterval(penSpecies(p), adults);
     if (p.breedT <= 0) {
       const free = p.animals.filter(a => a.adult && !a.held);
       if (free.length >= 2) {
@@ -720,7 +739,7 @@ function updatePen(p, dt) {
       const other = a === c.a ? c.b : c.a;
       const side = a === c.a ? -0.22 : 0.22;
       tx = (a.x + other.x) / 2 + side; ty = (a.y + other.y) / 2;
-      speed *= 2; courting = true;
+      speed *= 2; courting = true; a.acting = false;
     } else {
       // Alternate between standing still and walking around for a few seconds each.
       a.timer -= dt;
@@ -728,7 +747,16 @@ function updatePen(p, dt) {
         a.walking = !a.walking;
         a.timer = a.walking ? rand(C.walkMin, C.walkMax) : rand(C.restMin, C.restMax);
         if (a.walking) { a.tx = rand(p.x, p.x + p.w); a.ty = rand(p.y, p.y + p.h); }
+        else {                                   // starting a rest: maybe play the action during it
+          a.restT = 0; a.actEnd = 0;
+          if (Math.random() < C.actionChance) {
+            a.actStart = rand(0.3, 0.8);
+            a.actEnd = Math.min(a.timer - 0.3, a.actStart + rand(C.actionMin, C.actionMax));
+          }
+        }
       }
+      if (a.walking) a.acting = false;
+      else { a.restT += dt; a.acting = a.restT >= a.actStart && a.restT < a.actEnd; }
       if (a.walking) { tx = a.tx; ty = a.ty; } else { tx = a.x; ty = a.y; }
     }
     const dx = tx - a.x, dy = ty - a.y, dist = Math.hypot(dx, dy), step = speed * dt;
@@ -1001,7 +1029,7 @@ canvas.addEventListener('pointerdown', e => {
   // Normal play: grab an animal, grab a pen corner, or start a new pen on empty grass.
   const hit = findAnimal(px, py), corner = findCorner(px, py);
   if (hit && (!corner || hit.dist <= corner.dist)) {
-    hit.animal.held = true; hit.animal.moving = false;
+    hit.animal.held = true; hit.animal.moving = false; hit.animal.acting = false;
     if (hit.pen.court && (hit.pen.court.a === hit.animal || hit.pen.court.b === hit.animal)) cancelCourtship(hit.pen);
     UI.drag = { kind: 'animal', pen: hit.pen, animal: hit.animal, species: hit.animal.species, px, py };
     Sound.play('tap');
@@ -1278,8 +1306,9 @@ const CRITTERS = {   // proportions of the placeholder animals, in a 1 × 1 box,
   elephant: { body: '#a2abb5', dark: '#7f8893', bw: .29, bh: .22, leg: .21, legW: .115, head: .17, hx: .25, hy: -.07, ear: 'big',   tail: 'thin',  trunk: true }
 };
 
-/** Draw one placeholder animal frame. g is scaled so the box is 1 × 1; feet stand at y = 0.95. */
-function drawCritter(g, sp, phase, walking) {
+/** Draw one placeholder animal frame. g is scaled so the box is 1 × 1; feet stand at y = 0.95.
+    eating = head down at the grass (phase 0 and 1 are its two frames). */
+function drawCritter(g, sp, phase, walking, eating) {
   const ground = 0.95;
   const sw = walking ? Math.sin(phase) : 0;
   const bob = walking ? Math.abs(Math.cos(phase)) * 0.014 : (phase ? 0.008 : 0);
@@ -1307,7 +1336,11 @@ function drawCritter(g, sp, phase, walking) {
     poly([bx - 0.12, by - 0.08, bx - 0.31, by - 0.22, bx - 0.27, by - 0.05, bx - 0.33, by + 0.02, bx - 0.15, by + 0.06], '#f3e9d8');   // tail feathers
     ell(bx, by, 0.2, 0.17, '#fffaf0');
     ell(bx - 0.03, by + 0.02, 0.11, 0.075, '#ece0cc', 0.3);                          // wing
-    const hx = bx + 0.17, hy = by - 0.21;
+    let hx = bx + 0.17, hy = by - 0.21;
+    if (eating) {                                                                    // pecking at the ground
+      hx = bx + 0.3; hy = ground - 0.15 - (phase ? 0.07 : 0);
+      curve([bx + 0.12, by - 0.06, bx + 0.26, by - 0.08, hx - 0.02, hy - 0.02], 0.1, '#fffaf0');
+    }
     for (const dx of [-0.045, 0.005, 0.055]) ell(hx + dx, hy - 0.09, 0.036, 0.046, '#e23b2e');   // comb
     ell(hx + 0.075, hy + 0.085, 0.026, 0.042, '#e23b2e');                            // wattle
     poly([hx + 0.07, hy - 0.035, hx + 0.2, hy + 0.01, hx + 0.07, hy + 0.05], '#f2a81d');          // beak
@@ -1344,13 +1377,23 @@ function drawCritter(g, sp, phase, walking) {
   }
   leg(bx + s.bw * 0.72, A, s.body); leg(bx - s.bw * 0.42, -A, s.body);               // near legs
 
-  const hx = bx + s.hx, hy = by + s.hy, r = s.head;                                  // head
+  const r = s.head;                                                                  // head
+  let hx = bx + s.hx, hy = by + s.hy;
+  if (eating) {                                                                      // head down at the grass
+    const chew = phase ? 0.022 : 0;
+    if (s.trunk) hy += 0.05 + chew;                                                  // the elephant feeds with its trunk
+    else {
+      hx = Math.min(bx + s.bw * 0.85 + r * 0.55, 0.96 - r - (s.snout || 0));
+      hy = ground - r - 0.035 - chew;
+      if (!s.neck) curve([bx + s.bw * 0.55, by - s.bh * 0.15, hx - r * 0.2, by, hx - r * 0.2, hy - r * 0.1], r * 1.25, s.body);
+    }
+  }
   if (s.neck) curve([bx + s.bw * 0.62, by - s.bh * 0.25, hx - 0.03, by - s.bh * 0.6, hx - 0.01, hy + 0.02], 0.085, s.body);
   if (s.ear === 'long') { ell(hx - 0.04, hy - r - 0.06, 0.032, 0.105, s.body, -0.28); ell(hx + 0.02, hy - r - 0.07, 0.032, 0.105, s.body, -0.1); }
   else if (s.ear === 'leaf') ell(hx - r * 0.85, hy - r * 0.75, 0.055, 0.028, s.body, 0.5);
   else if (s.ear === 'point') { poly([hx - r * 0.9, hy - r * 0.35, hx - r * 0.55, hy - r * 1.6, hx - r * 0.05, hy - r * 0.85], s.dark); poly([hx - r * 0.3, hy - r * 0.7, hx + r * 0.15, hy - r * 1.6, hx + r * 0.5, hy - r * 0.75], s.body); }
   else if (s.ear === 'round') { ell(hx - r * 0.6, hy - r * 0.8, r * 0.36, r * 0.36, s.dark); ell(hx + r * 0.25, hy - r * 0.92, r * 0.34, r * 0.34, s.body); }
-  if (s.trunk) curve([hx + r * 0.55, hy + r * 0.15, hx + r * 1.6, hy + r * 0.7, hx + r * 1.1, ground - 0.13 - bob], 0.075, s.body);
+  if (s.trunk) curve([hx + r * 0.55, hy + r * 0.15, hx + r * 1.6, hy + r * 0.7, hx + r * (eating ? 0.75 : 1.1), ground - (eating ? 0.04 : 0.13 + bob)], 0.075, s.body);
   if (s.snout) { ell(hx + r * 0.78, hy + r * 0.28, s.snout, r * 0.52, s.snoutCol || s.body); dot(hx + r * 0.78 + s.snout * 0.8, hy + r * 0.1, 0.02, OUTLINE); }
   ell(hx, hy, r, r, s.body);
   if (sp === 'rabbit') dot(hx + r * 0.92, hy + 0.01, 0.018, '#e58aa0');
@@ -1412,11 +1455,15 @@ function animalFrames(sp) {
     const k = Math.min(size / im.width, size / im.height), w = im.width * k, h = im.height * k;
     g.drawImage(im, (size - w) / 2, size - h, w, h);
   });
-  const generated = (phase, walking) => make(g => { g.scale(size, size); drawCritter(g, sp, phase, walking); });
-  const idleArt = Art.get(sp, 'idle'), walkArt = Art.get(sp, 'walk'), custom = !!(idleArt || walkArt);
+  const generated = (phase, walking, eating) => make(g => { g.scale(size, size); drawCritter(g, sp, phase, walking, eating); });
+  const idleArt = Art.get(sp, 'idle'), walkArt = Art.get(sp, 'walk'), actionArt = Art.get(sp, 'action');
+  const custom = !!(idleArt || walkArt || actionArt);
   f = {
     idle: idleArt ? idleArt.map(fromImage) : walkArt ? [fromImage(walkArt[0])] : [generated(0, false), generated(1, false)],
     walk: walkArt ? walkArt.map(fromImage) : idleArt ? null : [0, 1, 2, 3].map(i => generated(i * Math.PI / 2, true)),
+    // action: artist frames if listed; otherwise herbivore placeholders eat grass and everything else has none
+    action: actionArt ? actionArt.map(fromImage)
+          : (!custom && CONFIG.animals[sp].diet === 'herbivore') ? [generated(0, false, true), generated(1, false, true)] : null,
     foot: custom ? 1 : 0.95,                                               // where the feet are inside the frame
     mirrorWhen: custom && CONFIG.art.facing === 'left' ? 1 : -1            // flip the frame when the animal faces this way
   };
@@ -1430,11 +1477,13 @@ function animalScale(a) {
   if (a.adult) return 1;
   return CONFIG.babyScale + (1 - CONFIG.babyScale) * clamp(a.age / CONFIG.growTime, 0, 1);
 }
-/** Draw an animal standing on screen point (x, y). face: 1 = looking right, -1 = looking left. */
-function drawAnimal(sp, x, y, box, face, walking, seed) {
-  const f = animalFrames(sp), frames = walking ? f.walk : f.idle;
-  const fps = walking ? CONFIG.art.walkFps : CONFIG.art.idleFps;
-  const img = frames[Math.floor(G.time * fps + seed * 0.37) % frames.length];
+/** Draw an animal standing on screen point (x, y). face: 1 = looking right, -1 = looking left.
+    mode: 'idle' | 'walk' | 'action'; time: seconds into that animation. */
+function drawAnimal(sp, x, y, box, face, mode, time) {
+  const f = animalFrames(sp), A = CONFIG.art;
+  if (mode === 'action' && !f.action) mode = 'idle';              // this animal has no action frames (yet)
+  const frames = f[mode], fps = mode === 'walk' ? A.walkFps : mode === 'action' ? A.actionFps : A.idleFps;
+  const img = frames[Math.floor(Math.max(0, time) * fps) % frames.length];
   const top = y - box * f.foot;
   if (face === f.mirrorWhen) {
     ctx.save(); ctx.translate(x, 0); ctx.scale(-1, 1);
@@ -1582,7 +1631,9 @@ function render() {
       const x = sx(a.x, a.y), y = sy(a.x, a.y), box = animalBox(a.species) * animalScale(a);
       ctx.fillStyle = 'rgba(0,0,0,.2)';
       ctx.beginPath(); ctx.ellipse(x, y, box * 0.24, box * 0.08, 0, 0, TAU); ctx.fill();
-      drawAnimal(a.species, x, y, box, a.face, a.moving, a.id);
+      if (a.moving) drawAnimal(a.species, x, y, box, a.face, 'walk', G.time + a.id * 0.37);
+      else if (a.acting) drawAnimal(a.species, x, y, box, a.face, 'action', a.restT - a.actStart);
+      else drawAnimal(a.species, x, y, box, a.face, 'idle', G.time + a.id * 0.37);
     }
     drawFence(p.x, p.y + p.h, p.x + p.w, p.y + p.h, p.w);
     drawFence(p.x + p.w, p.y, p.x + p.w, p.y + p.h, p.h);
@@ -1644,7 +1695,7 @@ function render() {
   if (d && (d.kind === 'animal' || (d.kind === 'stock' && d.has && d.phase !== 'scroll'))) {
     const scale = d.kind === 'animal' ? animalScale(d.animal) : animalScale({ adult: d.adult, age: d.age });
     const box = Math.max(animalBox(d.species), 56) * 1.15 * scale;
-    drawAnimal(d.species, d.px, d.py - Input.lift, box, 1, false, 0);
+    drawAnimal(d.species, d.px, d.py - Input.lift, box, 1, 'idle', 0);
   }
 }
 
@@ -2056,7 +2107,7 @@ const Art = {
     const A = CONFIG.art, add = (key, files) => { this.lists[key] = files || []; this.loaded[key] = []; };
     for (const sp of CONFIG.animalOrder) {
       const def = (A.animals || {})[sp] || {};
-      add('animal.' + sp + '.idle', def.idle); add('animal.' + sp + '.walk', def.walk);
+      add('animal.' + sp + '.idle', def.idle); add('animal.' + sp + '.walk', def.walk); add('animal.' + sp + '.action', def.action);
     }
     for (const name of ['grass', 'trees', 'fenceSegment', 'fencePost']) add('scenery.' + name, (A.scenery || {})[name]);
     for (const key in this.lists) this.lists[key].forEach((src, i) => {
@@ -2071,7 +2122,7 @@ const Art = {
     const want = (this.lists[key] || []).length, have = this.loaded[key] || [];
     return want > 0 && have.filter(Boolean).length === want ? have : null;
   },
-  get(sp, kind) { return this.list('animal.' + sp + '.' + kind); },   // kind: 'idle' | 'walk'
+  get(sp, kind) { return this.list('animal.' + sp + '.' + kind); },   // kind: 'idle' | 'walk' | 'action'
   scenery(name) { return this.list('scenery.' + name); },             // 'grass' | 'trees' | 'fenceSegment' | 'fencePost'
   /** New images arrived: redraw everything that shows them. */
   refresh() {
