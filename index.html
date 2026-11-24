@@ -240,6 +240,7 @@ const CONFIG = {
   wellBeingMax: 100,
   wellBeingFall: 0.2,         // per second with one unhappy pen
   wellBeingFallExtra: 0.5,    // extra factor per additional unhappy pen
+  crowdSeverity: 1,           // every animal over a pen's capacity counts like this many extra unhappy pens
   wellBeingRise: 0.1,         // per second when nobody is unhappy
   wbYellowBelow: 60,
   wbRedBelow: 30,
@@ -549,7 +550,7 @@ function createPen(r) {
   if (!info.valid) return null;
   G.money -= info.cost;
   const pen = { id: G.nextId++, x: r.x, y: r.y, w: r.w, h: r.h, animals: [],
-                crowded: false, scared: false, breedT: null, court: null, sadT: 0 };
+                crowded: false, scared: false, severity: 0, breedT: null, court: null, sadT: 0 };
   G.pens.push(pen);
   return pen;
 }
@@ -675,8 +676,11 @@ function goalProgress() {
 /* ----- unhappiness ----- */
 function updatePenStatus() {
   for (const p of G.pens) {
-    p.crowded = penLoad(p) > p.w * p.h;
+    const over = penLoad(p) - p.w * p.h;        // animals above capacity (a baby counts 0.5)
+    p.crowded = over > 0;
     p.scared = false;
+    p.severity = 0;                             // how unhappy the pen is: 0 = fine, 1 = one "unhappy pen", more = worse
+    if (p.crowded) p.severity = Math.max(1, over * CONFIG.crowdSeverity);
     const sp = penSpecies(p);
     if (!sp) continue;
     const fears = CONFIG.animals[sp].fears;
@@ -684,7 +688,7 @@ function updatePenStatus() {
     for (const q of G.pens) {
       if (q === p) continue;
       const qs = penSpecies(q);
-      if (qs && fears.includes(qs) && rectsTouch(p, q)) { p.scared = true; break; }
+      if (qs && fears.includes(qs) && rectsTouch(p, q)) { p.scared = true; p.severity = Math.max(1, p.severity); break; }
     }
   }
 }
@@ -701,7 +705,7 @@ function updatePen(p, dt) {
   }
 
   // Breeding
-  const eligible = adults >= 2 && !p.crowded && !p.scared;
+  const eligible = adults >= 2 && !p.scared;   // crowded pens keep breeding; only fear stops it
   if (!eligible) {
     p.breedT = null; p.court = null;
   } else if (p.court) {
@@ -774,7 +778,7 @@ function updatePen(p, dt) {
   if (p.crowded || p.scared) {
     p.sadT -= dt;
     if (p.sadT <= 0) {
-      p.sadT = C.sadIconInterval;
+      p.sadT = C.sadIconInterval / Math.min(4, p.severity || 1);   // unhappier pens show more sad faces
       const kind = p.crowded && p.scared ? (Math.random() < 0.5 ? 'crowd' : 'fear') : (p.crowded ? 'crowd' : 'fear');
       G.particles.push({ kind, x: rand(p.x + 0.3, p.x + p.w - 0.3), y: rand(p.y + 0.3, p.y + p.h - 0.3), z: 0, life: C.sadIconLife });
     }
@@ -789,8 +793,10 @@ function update(dt) {
 
   // Well-being
   updatePenStatus();
+  // "unhappy" adds up the severity of all pens: a scared or slightly crowded pen counts 1,
+  // a pen that is several animals over capacity counts once per extra animal.
   let unhappy = 0, animals = 0;
-  for (const p of G.pens) { if (p.crowded || p.scared) unhappy++; animals += p.animals.length; }
+  for (const p of G.pens) { unhappy += p.severity; animals += p.animals.length; }
   if (unhappy > 0) G.wellBeing -= C.wellBeingFall * (1 + C.wellBeingFallExtra * (unhappy - 1)) * dt;
   else if (animals > 0) G.wellBeing = Math.min(C.wellBeingMax, G.wellBeing + C.wellBeingRise * dt);
   if (G.wellBeing <= 0) {
